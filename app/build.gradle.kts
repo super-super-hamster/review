@@ -16,8 +16,8 @@ android {
         applicationId = "com.hamster.review"
         minSdk = 31
         targetSdk = 37
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 100000
+        versionName = "1.0.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -62,4 +62,9 @@ dependencies {
     implementation(libs.squircle.shape)
     implementation(libs.androidx.preference.ktx)
     implementation(libs.kotlinx.serialization.json)
+    implementation(libs.latex.base)
+    implementation(libs.latex.renderer)
+    implementation(libs.latex.parser)
+    implementation(libs.markdown.renderer.android)
+    implementation(libs.markdown.renderer.m3)
 }

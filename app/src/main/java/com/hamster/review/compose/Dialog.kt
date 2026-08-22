@@ -45,6 +45,7 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalWindowInfo
@@ -61,8 +62,6 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.hamster.review.R
 import kotlinx.coroutines.delay
-import java.util.Locale
-import kotlin.text.isNotEmpty
 
 @Composable
 fun EditTextDialog(
@@ -267,6 +266,8 @@ fun SliderDialog(
     val initialValue = remember { value }
     var isConfirmed by remember { mutableStateOf(false) }
 
+    val currentLocale = LocalConfiguration.current.locales.get(0)
+
     ConfirmDialog(
         title = title,
         cancelText = cancelText,
@@ -302,7 +303,7 @@ fun SliderDialog(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Text(text = String.format(Locale.getDefault(), "%+.1f", valueRange.start), fontSize = 12.sp, color = colorResource(R.color.text))
+            Text(text = String.format(currentLocale, "%+.1f", valueRange.start), fontSize = 12.sp, color = colorResource(R.color.text))
 
             Spacer(modifier = Modifier.width(8.dp))
 
@@ -320,7 +321,7 @@ fun SliderDialog(
 
             Spacer(modifier = Modifier.width(8.dp))
 
-            Text(text = String.format(Locale.getDefault(), "%+.1f", valueRange.endInclusive), fontSize = 12.sp, color = colorResource(R.color.text))
+            Text(text = String.format(currentLocale, "%+.1f", valueRange.endInclusive), fontSize = 12.sp, color = colorResource(R.color.text))
         }
     }
 }

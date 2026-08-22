@@ -5,29 +5,63 @@ import android.os.Bundle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.viewModels
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.LocalOverscrollFactory
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.colorResource
+import androidx.compose.ui.unit.dp
 import androidx.fragment.app.FragmentActivity
+import androidx.navigation.NavGraph.Companion.findStartDestination
+import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import com.airbnb.lottie.compose.LottieAnimation
+import com.airbnb.lottie.compose.LottieCompositionSpec
+import com.airbnb.lottie.compose.LottieConstants
+import com.airbnb.lottie.compose.animateLottieCompositionAsState
+import com.airbnb.lottie.compose.rememberLottieComposition
 import com.hamster.review.compose.scaleInPopEnter
 import com.hamster.review.compose.scaleOutExit
 import com.hamster.review.compose.slideInWithScaleEnter
 import com.hamster.review.compose.slideOutWithScalePopExit
 import com.hamster.review.screen.MainScreen
+import com.hamster.review.screen.ReviewScreen
 import com.kyant.backdrop.backdrops.layerBackdrop
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
+import com.kyant.backdrop.drawBackdrop
+import com.kyant.backdrop.effects.blur
+import com.kyant.backdrop.effects.lens
+import com.kyant.backdrop.effects.vibrancy
 import dev.chrisbanes.haze.HazeState
+import dev.chrisbanes.haze.HazeStyle
+import dev.chrisbanes.haze.HazeTint
+import dev.chrisbanes.haze.hazeEffect
 import dev.chrisbanes.haze.hazeSource
 import dev.chrisbanes.haze.materials.ExperimentalHazeMaterialsApi
 import kotlinx.coroutines.CoroutineScope
@@ -43,6 +77,8 @@ class MainActivity : FragmentActivity() {
         ActivityResultContracts.RequestPermission()
     ) { _: Boolean -> }
 
+    private val mainViewModel: MainViewModel by viewModels()
+
     @SuppressLint("UnusedMaterial3ScaffoldPaddingParameter")
     @OptIn(ExperimentalMaterial3Api::class, ExperimentalHazeMaterialsApi::class)
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -52,11 +88,36 @@ class MainActivity : FragmentActivity() {
 
         setContent {
             val navController = rememberNavController()
+            fun NavHostController.simpleNavigate(route: Any) {
+                this.navigate(route) {
+                    popUpTo(this@simpleNavigate.graph.findStartDestination().id) {
+                        saveState = true // 保留滚动状态
+                    }
+                    launchSingleTop = true // 同一个页面不会创建新的实例
+                    restoreState = true // 恢复之前的状态
+                }
+            }
 
             val hazeState = remember { HazeState() }
             val backdrop = rememberLayerBackdrop {
                 drawContent()
             }
+
+            var showBlur by remember { mutableStateOf(false) }
+            val blurRadius by animateDpAsState(
+                targetValue = if (showBlur) 8.dp else 0.dp,
+                animationSpec = tween(100),
+                label = "blur"
+            )
+
+            var showTopBar by remember { mutableStateOf(true) }
+
+            var showLoading by remember { mutableStateOf(false) }
+            val loadingComposition by rememberLottieComposition(LottieCompositionSpec.RawRes(R.raw.loading_anim))
+            val loadingProgress by animateLottieCompositionAsState(
+                composition = loadingComposition,
+                iterations = LottieConstants.IterateForever
+            )
 
             MaterialTheme {
                 CompositionLocalProvider( LocalOverscrollFactory provides null) { // 禁用边缘回弹和光晕效果
@@ -77,253 +138,100 @@ class MainActivity : FragmentActivity() {
                                         popEnterTransition = { scaleInPopEnter() },
                                         popExitTransition = { slideOutWithScalePopExit() }
                                     ) {
-                                        MainScreen()
+                                        MainScreen(
+                                            setTopbarTitle = {
+                                                mainViewModel.topbarTitle = it
+                                            },
+                                            onNavigate = {
+                                                navController.simpleNavigate(it)
+                                            }
+                                        )
+                                    }
+
+                                    composable<Review>(
+                                        enterTransition = { slideInWithScaleEnter() },
+                                        exitTransition = { scaleOutExit() },
+                                        popEnterTransition = { scaleInPopEnter() },
+                                        popExitTransition = { slideOutWithScalePopExit() }
+                                    ) {
+                                        ReviewScreen(
+                                            setTopbarTitle = {
+                                                mainViewModel.topbarTitle = it
+                                            },
+                                            onNavigate = {
+                                                navController.simpleNavigate(it)
+                                            }
+                                        )
                                     }
                                 }
 
-//                                // 高斯模糊层
-//                                if (isMenuExpanded || blurRadius > 0.dp) {
-//                                    Box(
-//                                        modifier = Modifier
-//                                            .fillMaxSize()
-//                                            .hazeEffect(
-//                                                state = hazeState,
-//                                                style = HazeStyle(
-//                                                    blurRadius = blurRadius,
-//                                                    tint = HazeTint(Color.Transparent),
-//                                                    noiseFactor = 0f
-//                                                )
-//                                            )
-//                                            .clickable(
-//                                                interactionSource = remember { MutableInteractionSource() },
-//                                                indication = null
-//                                            ) {
-//                                                isMenuExpanded = false
-//                                            }
-//                                    )
-//                                }
-//
-//                                // 底部菜单栏
-//                                if (mainViewModel.showBottomMenu) {
-//                                    Box(modifier = Modifier
-//                                        .align(Alignment.BottomCenter)
-//                                        .systemBarsPadding()) {
-//                                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-//                                            // 展开菜单栏
-//                                            AnimatedVisibility(
-//                                                visible = isMenuExpanded,
-//                                                enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
-//                                                exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
-//                                                modifier = Modifier.padding(vertical = 6.dp)
-//                                            ) {
-//                                                Surface(
-//                                                    shape = squircleShape,
-//                                                    color = colorResource(R.color.bg_dialog),
-//                                                    tonalElevation = 8.dp,
-//                                                    shadowElevation = 8.dp,
-//                                                    modifier = Modifier
-//                                                        .fillMaxWidth()
-//                                                        .height(512.dp)
-//                                                        .padding(horizontal = 12.dp)
-//                                                ) {
-//                                                    ExpandedBottomMenu(
-//                                                        mainViewModel = mainViewModel,
-//                                                        selectedIndex = selectedIndex,
-//                                                        setSelectedIndex = { selectedIndex = it },
-//                                                        inputText = inputText,
-//                                                        setInputText = { inputText = it },
-//                                                        onNavigate = { navController.expandMenuNavigate(it) },
-//                                                        onDragDown = { isMenuExpanded = false },
-//                                                    )
-//                                                }
-//                                            }
-//
-//                                            // 底部菜单栏
-//                                            Surface(
-//                                                color = colorResource(R.color.bg_dialog),
-//                                                shape = squircleShape,
-//                                                tonalElevation = 8.dp,
-//                                                shadowElevation = 8.dp,
-//                                                modifier = Modifier
-//                                                    .padding(horizontal = 12.dp, vertical = 6.dp)
-//                                                    .height(64.dp)
-//                                                    .fillMaxWidth()
-//                                            ) {
-//                                                Box(
-//                                                    modifier = Modifier
-//                                                        .fillMaxSize()
-//                                                        .padding(horizontal = 48.dp)
-//                                                ) {
-//                                                    // 助手按钮
-//                                                    Box(
-//                                                        modifier = Modifier
-//                                                            .size(48.dp)
-//                                                            .align(Alignment.CenterStart)
-//                                                            .clickable(
-//                                                                onClick = {
-//                                                                    if (!isMenuExpanded) {
-//                                                                        selectedIndex = 0
-//                                                                        isMenuExpanded = true
-//                                                                    } else {
-//                                                                        if (selectedIndex == 0) {
-//                                                                            isMenuExpanded = false
-//                                                                        } else {
-//                                                                            selectedIndex = 0
-//                                                                        }
-//                                                                    }
-//                                                                },
-//                                                                indication = null,
-//                                                                interactionSource = remember { MutableInteractionSource() } // 必须配合 interactionSource 使用
-//                                                            ),
-//                                                        contentAlignment = Alignment.Center
-//                                                    ) {
-//                                                        Icon(painterResource(R.drawable.ic_assistant), null, tint = Color.Gray)
-//                                                    }
-//
-//                                                    // 通用按钮
-//                                                    Box(modifier = Modifier
-//                                                        .height(48.dp)
-//                                                        .width(72.dp)
-//                                                        .align(Alignment.Center), contentAlignment = Alignment.Center) {
-//                                                        ButtonPro(
-//                                                            icon = universalButtonIconId,
-//                                                            onTap = {
-//                                                                val currentHierarchy = navController.currentDestination?.hierarchy ?: return@ButtonPro
-//
-//                                                                when {
-//                                                                    currentHierarchy.any { it.hasRoute<SetKeywords>() } -> {
-//                                                                        mainViewModel.isShowAddKeywordDialog = true
-//                                                                    }
-//                                                                    currentHierarchy.any { it.hasRoute<Schedule>() } -> {
-//                                                                        navController.navigate(ImportCurriculum)
-//                                                                    }
-//                                                                    currentHierarchy.any { it.hasRoute<Time>() } -> {
-//                                                                        mainViewModel.changeStateOfIsSetInvisibleApp()
-//                                                                    }
-//                                                                    currentHierarchy.any { it.hasRoute<DiaryPreview>() } -> {
-//                                                                        mainViewModel.showAddDiaryDialog = true
-//                                                                    }
-//                                                                    currentHierarchy.any { it.hasRoute<Diary>() } -> {
-//                                                                        mainViewModel.isAddDiaryImage = true
-//                                                                    }
-//                                                                    currentHierarchy.any { it.hasRoute<DecibelMeter>() } -> {
-//                                                                        mainViewModel.showDecibelMeterOffsetDialog = true
-//                                                                    }
-//                                                                } },
-//                                                            onLongPressStart = {
-//                                                                if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED && isModelReady) {
-//                                                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-//                                                                    showRecording = true
-//                                                                    speechManager.startListening()
-//                                                                } else {
-//                                                                    requestAudioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
-//                                                                } },
-//                                                            onLongPressEnd = {
-//                                                                showRecording = false
-//
-//                                                                if (mainViewModel.speechFinalResult != "") {
-//                                                                    selectedIndex = 0
-//                                                                    isMenuExpanded = true
-//                                                                    inputText = mainViewModel.speechFinalResult
-//                                                                    mainViewModel.setSpeechFinalResult("")
-//                                                                }
-//
-//                                                                speechManager.stopListening()
-//                                                            }
-//                                                        )
-//                                                    }
-//
-//                                                    // 展开按钮
-//                                                    Box(modifier = Modifier
-//                                                        .height(48.dp)
-//                                                        .width(72.dp)
-//                                                        .align(Alignment.CenterEnd), contentAlignment = Alignment.CenterEnd) {
-//                                                        AnimationButton(
-//                                                            animation = R.raw.ic_arrow_anim,
-//                                                            changed = isMenuExpanded,
-//                                                            onClick = {
-//                                                                selectedIndex = 1
-//                                                                isMenuExpanded = !isMenuExpanded
-//                                                            }
-//                                                        )
-//                                                    }
-//                                                }
-//                                            }
-//                                        }
-//                                    }
-//                                }
-//
-//                                // 显示顶部标题栏
-//                                if (showTopBar) {
-//                                    CenterAlignedTopAppBar(
-//                                        title = {
-//                                            AnimatedContent (
-//                                                targetState = showWeatherDetail,
-//                                                transitionSpec = {
-//                                                    if (showWeatherDetail) {
-//                                                        (slideInHorizontally { width -> width } + fadeIn()) togetherWith
-//                                                                (slideOutHorizontally { width -> -width } + fadeOut())
-//                                                    } else {
-//                                                        (slideInHorizontally { width -> -width } + fadeIn()) togetherWith
-//                                                                (slideOutHorizontally { width -> width } + fadeOut())
-//                                                    }
-//                                                }
-//                                            ) { targetIsWeather ->
-//                                                if (targetIsWeather) {
-//                                                    Text("${WeatherData.getLocation() ?: ""} ${WeatherData.getWeatherState() ?: ""}")
-//                                                } else {
-//                                                    Text(currentTitle)
-//                                                }
-//                                            }
-//                                        },
-//                                        actions = {
-//                                            Weather(
-//                                                onClick = {
-//                                                    showWeatherDetail = !showWeatherDetail
-//                                                }
-//                                            )
-//                                        },
-//                                        colors = TopAppBarDefaults.topAppBarColors(
-//                                            containerColor = Color.Transparent,
-//                                            scrolledContainerColor = Color.Transparent
-//                                        ),
-//                                        modifier = Modifier
-//                                            .align(Alignment.TopCenter)
-//                                            .height(80.dp)
-//                                            .fillMaxWidth()
-//                                            .shadow(elevation = 0.dp)
-//                                            .drawBackdrop(
-//                                                backdrop = backdrop,
-//                                                shape = { RoundedCornerShape(0.dp) },
-//                                                effects = {
-//                                                    vibrancy()
-//                                                    blur(4f.dp.toPx())
-//                                                    lens(12f.dp.toPx(), 8f.dp.toPx())
-//                                                },
-//                                            )
-//                                    )
-//                                }
-//
-//                                // 显示加载
-//                                if (showLoading) {
-//                                    Box(
-//                                        modifier = Modifier
-//                                            .fillMaxSize()
-//                                            .clickable(
-//                                                interactionSource = remember { MutableInteractionSource() },
-//                                                indication = null
-//                                            ) {
-////                                                showLoading = false
-//                                            },
-//                                        contentAlignment = Alignment.Center
-//                                    ) {
-//                                        LottieAnimation(
-//                                            composition = loadingComposition,
-//                                            progress = { loadingProgress },
-//                                            modifier = Modifier.size(196.dp)
-//                                        )
-//                                    }
-//                                }
+                                // 高斯模糊层
+                                if (blurRadius > 0.dp) {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .hazeEffect(
+                                                state = hazeState,
+                                                style = HazeStyle(
+                                                    blurRadius = blurRadius,
+                                                    tint = HazeTint(Color.Transparent),
+                                                    noiseFactor = 0f
+                                                )
+                                            )
+                                            .clickable(
+                                                interactionSource = remember { MutableInteractionSource() },
+                                                indication = null
+                                            ) {
+                                                showBlur = false
+                                            }
+                                    )
+                                }
+
+                                // 显示顶部标题栏
+                                if (showTopBar) {
+                                    CenterAlignedTopAppBar(
+                                        title = { Text(text = mainViewModel.topbarTitle) },
+                                        colors = TopAppBarDefaults.topAppBarColors(
+                                            containerColor = Color.Transparent,
+                                            scrolledContainerColor = Color.Transparent
+                                        ),
+                                        modifier = Modifier
+                                            .align(Alignment.TopCenter)
+                                            .height(80.dp)
+                                            .fillMaxWidth()
+                                            .shadow(elevation = 0.dp)
+                                            .drawBackdrop(
+                                                backdrop = backdrop,
+                                                shape = { RoundedCornerShape(0.dp) },
+                                                effects = {
+                                                    vibrancy()
+                                                    blur(4f.dp.toPx())
+                                                    lens(12f.dp.toPx(), 8f.dp.toPx())
+                                                },
+                                            )
+                                    )
+                                }
+
+                                // 显示加载
+                                if (showLoading) {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .clickable(
+                                                interactionSource = remember { MutableInteractionSource() },
+                                                indication = null
+                                            ) {
+//                                                showLoading = false
+                                            },
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        LottieAnimation(
+                                            composition = loadingComposition,
+                                            progress = { loadingProgress },
+                                            modifier = Modifier.size(196.dp)
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
