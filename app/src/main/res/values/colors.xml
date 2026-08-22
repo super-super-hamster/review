@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="purple_200">#FFBB86FC</color>
+    <color name="purple_500">#FF6200EE</color>
+    <color name="purple_700">#FF3700B3</color>
+    <color name="teal_200">#FF03DAC5</color>
+    <color name="teal_700">#FF018786</color>
+    <color name="black">#FF000000</color>
+    <color name="white">#FFFFFFFF</color>
+    <color name="gray">#393939</color>
+    <color name="light_gray">#EEEEEE</color>
+
+    <color name="mikuGreen">#39C5BB</color>
+    <color name="darkBrown">#6D2705</color>
+    <color name="lightBrown">#CF7617</color>
+    <color name="brown">#9A3C0E</color>
+    <color name="silver">#D9D9D9</color>
+
+    <color name="game_console_background">#2E2E2E</color>
+    <color name="game_console_screen">#EEEEEE</color>
+
+    <color name="game_2048_2">#DFE677</color>
+    <color name="game_2048_4">#B0E677</color>
+    <color name="game_2048_8">#83E678</color>
+    <color name="game_2048_16">#77E694</color>
+    <color name="game_2048_32">#77E6B9</color>
+    <color name="game_2048_64">#77E6DF</color>
+    <color name="game_2048_128">#77C9E6</color>
+    <color name="game_2048_256">#77A6E6</color>
+    <color name="game_2048_512">#7783E6</color>
+    <color name="game_2048_1024">#9077E6</color>
+    <color name="game_2048_2048">#B477E6</color>
+    <color name="game_2048_4096">#D877E6</color>
+    <color name="game_2048_8192">#E677BC</color>
+    <color name="game_2048_16384">#E3686A</color>
+    <color name="game_2048_32768">#E37D68</color>
+    <color name="game_2048_65536">#E39368</color>
+    <color name="game_2048_131072">#E3A868</color>
+
+    <color name="background">#F2F2F4</color>
+    <color name="bg_tile">#D9D9D9</color>
+    <color name="item">#393939</color>
+    <color name="title_text">#0089A7</color>
+    <color name="text">#FF000000</color>
+    <color name="item_group_card">#FFFFFFFF</color>
+    <color name="item_group_card_shadow">#393939</color>
+    <color name="bg_dialog">#FFFFFFFF</color>
+    <color name="bg_on_dialog">#F4F4F5</color>
+    <color name="bg_bottom_sheet">#FFFFFFFF</color>
+    <color name="explanation_text">#393939</color>
+    <color name="bg_explanation">#E6E6E8</color>
+    <color name="dialog_border_up">#F0F0F0</color>
+    <color name="dialog_border_down">#C4C4C4</color>
+    <color name="btn_confirm">#39C5BB</color>
+    <color name="btn_cancel">#80393939</color>
+    <color name="icon">#0089A7</color>
+    <color name="sheet_button">#80D9D9D9</color>
+
+    <color name="tabs_bg">#F4F4F5</color>
+    <color name="tabs_text">#757575</color>
+    <color name="tabs_selected_bg">#FFFFFF</color>
+    <color name="tabs_selected_text">#1D1D1D</color>
+
+    <color name="heatmap_empty">#F5F5F5</color>
+</resources>
