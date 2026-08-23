@@ -8,4 +8,6 @@ sealed interface Route
 object Main : Route
 
 @Serializable
-object Review : Route
+data class Review(
+    val subjectId: Long
+) : Route

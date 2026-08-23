@@ -2,6 +2,7 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
+    alias(libs.plugins.ksp)
 }
 
 android {
@@ -14,7 +15,7 @@ android {
 
     defaultConfig {
         applicationId = "com.hamster.review"
-        minSdk = 31
+        minSdk = 34
         targetSdk = 37
         versionCode = 100000
         versionName = "1.0.0"
@@ -67,4 +68,7 @@ dependencies {
     implementation(libs.latex.parser)
     implementation(libs.markdown.renderer.android)
     implementation(libs.markdown.renderer.m3)
+    implementation(libs.room.runtime)
+    implementation(libs.room.ktx)
+    ksp(libs.room.compiler)
 }

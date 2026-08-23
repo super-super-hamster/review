@@ -10,8 +10,8 @@ import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.Color
 import androidx.core.content.ContextCompat
 import androidx.core.graphics.ColorUtils
-import kotlinx.coroutines.delay
 import com.hamster.review.R
+import kotlinx.coroutines.delay
 
 class ScrollTarget {
     val requester = BringIntoViewRequester()

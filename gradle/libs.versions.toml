@@ -19,6 +19,8 @@ preference = "1.2.1"
 kotlinxSerialization = "1.7.1"
 latex = "1.3.0"
 markdownRenderer = "0.40.2"
+room = "2.8.4"
+ksp = "2.3.11"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -46,8 +48,13 @@ latex-parser = { module = "io.github.huarangmeng:latex-parser", version.ref = "l
 latex-renderer = { module = "io.github.huarangmeng:latex-renderer", version.ref = "latex" }
 markdown-renderer-android = { group = "com.mikepenz", name = "multiplatform-markdown-renderer-android", version.ref = "markdownRenderer" }
 markdown-renderer-m3 = { group = "com.mikepenz", name = "multiplatform-markdown-renderer-m3", version.ref = "markdownRenderer" }
+room-runtime = { group = "androidx.room", name = "room-runtime", version.ref = "room" }
+room-ktx = { group = "androidx.room", name = "room-ktx", version.ref = "room" }
+room-compiler = { group = "androidx.room", name = "room-compiler", version.ref = "room" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
 kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
 kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
+
+ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }

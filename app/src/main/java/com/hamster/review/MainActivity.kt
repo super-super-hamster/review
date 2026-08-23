@@ -25,6 +25,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -41,6 +42,7 @@ import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.toRoute
 import com.airbnb.lottie.compose.LottieAnimation
 import com.airbnb.lottie.compose.LottieCompositionSpec
 import com.airbnb.lottie.compose.LottieConstants
@@ -51,7 +53,7 @@ import com.hamster.review.compose.scaleOutExit
 import com.hamster.review.compose.slideInWithScaleEnter
 import com.hamster.review.compose.slideOutWithScalePopExit
 import com.hamster.review.screen.MainScreen
-import com.hamster.review.screen.ReviewScreen
+import com.hamster.review.screen.ReviewScreenNew
 import com.kyant.backdrop.backdrops.layerBackdrop
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 import com.kyant.backdrop.drawBackdrop
@@ -88,6 +90,8 @@ class MainActivity : FragmentActivity() {
 
         setContent {
             val navController = rememberNavController()
+            val subjects by mainViewModel.subjects.collectAsState()
+
             fun NavHostController.simpleNavigate(route: Any) {
                 this.navigate(route) {
                     popUpTo(this@simpleNavigate.graph.findStartDestination().id) {
@@ -139,6 +143,8 @@ class MainActivity : FragmentActivity() {
                                         popExitTransition = { slideOutWithScalePopExit() }
                                     ) {
                                         MainScreen(
+                                              subjects = subjects,
+
                                             setTopbarTitle = {
                                                 mainViewModel.topbarTitle = it
                                             },
@@ -154,7 +160,8 @@ class MainActivity : FragmentActivity() {
                                         popEnterTransition = { scaleInPopEnter() },
                                         popExitTransition = { slideOutWithScalePopExit() }
                                     ) {
-                                        ReviewScreen(
+                                        ReviewScreenNew(
+                                              subjectId = it.toRoute<Review>().subjectId,
                                             setTopbarTitle = {
                                                 mainViewModel.topbarTitle = it
                                             },
