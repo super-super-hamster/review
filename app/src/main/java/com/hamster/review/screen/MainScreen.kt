@@ -1,6 +1,8 @@
 ﻿package com.hamster.review.screen
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Text
@@ -12,6 +14,7 @@ import androidx.compose.ui.unit.sp
 import com.hamster.review.Route
 import com.hamster.review.compose.ItemGroup
 import com.hamster.review.compose.PageColumn
+import com.hamster.review.compose.ProgressBar
 import com.hamster.review.compose.SharedTiltState
 import com.hamster.review.compose.rememberSharedTiltState
 import com.hamster.review.data.db.SubjectWithTodayCount
@@ -27,14 +30,8 @@ fun MainScreen(
     setTopbarTitle("首页")
 
     PageColumn(sharedTiltState = sharedTiltState) {
-        if (subjects.isEmpty()) {
-            Text(
-                modifier = Modifier.padding(24.dp),
-                text = "暂无科目，请先导入题库",
-                fontSize = 18.sp
-            )
-        } else {
-            subjects.forEach { subject ->
+        if (!subjects.isEmpty()) {
+            subjects.forEachIndexed { index, subject ->
                 SubjectCard(
                     subjectName = subject.subject.name,
                     todayCount = subject.todayCount,
@@ -43,6 +40,10 @@ fun MainScreen(
                     onNavigate = onNavigate,
                     setTopbarTitle = setTopbarTitle
                 )
+
+                if (index < subjects.size - 1) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                }
             }
         }
     }
@@ -70,11 +71,28 @@ fun SubjectCard(
             .padding(24.dp),
         titleState = sharedTiltState
     ) {
-        Text(text = subjectName, fontSize = 24.sp, fontWeight = FontWeight.Bold)
         Text(
-            text = "今日待复习：$todayCount 题",
-            fontSize = 14.sp,
-            modifier = Modifier.padding(top = 8.dp)
+            text = subjectName,
+            fontSize = 24.sp,
+            fontWeight = FontWeight.Bold
         )
+
+        Spacer(modifier = Modifier.height(4.dp))
+
+        Text(
+            modifier = Modifier.padding(start = 4.dp),
+            text = "${10 - todayCount} / 10",  // TODO: 改成实际总数
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Light
+        )
+
+        ProgressBar(
+            modifier = Modifier
+                .height(8.dp)
+                .fillMaxWidth(),
+            progress = (10 - todayCount).toFloat() / 10
+        ) {
+            // TODO: 设置刷题数量，用Slider
+        }
     }
 }

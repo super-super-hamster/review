@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -29,6 +30,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.selection.LocalTextSelectionColors
 import androidx.compose.foundation.verticalScroll
@@ -48,6 +50,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
@@ -178,7 +181,7 @@ fun Modifier.scrollTargetId(id: String): Modifier = composed {
 
 @Composable
 fun RingProgress(
-    progress: Float, // 假设 progress 范围是 0f ~ 1f
+    progress: Float, // 范围是 0f ~ 1f
     modifier: Modifier = Modifier,
     ringColor: Color = colorResource(R.color.mikuGreen),
     trackColor: Color = colorResource(R.color.light_gray),
@@ -243,6 +246,38 @@ fun RingProgress(
         }
 
         Text(text = text, fontSize = textFontSize, fontWeight = FontWeight.Normal)
+    }
+}
+
+@Composable
+fun ProgressBar(
+    progress: Float,
+    modifier: Modifier = Modifier,
+    progressColor: Color = colorResource(R.color.mikuGreen),
+    trackColor: Color = colorResource(R.color.light_gray),
+    onClick: () -> Unit,
+) {
+    val animatedProgress by animateFloatAsState(
+        targetValue = progress.coerceIn(0f, 1f),
+        animationSpec = tween(durationMillis = 500),
+    )
+
+    Box(
+        modifier = modifier
+            .clip(CircleShape)
+            .background(trackColor)
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = { onClick() }
+            ),
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxHeight()
+                .fillMaxWidth(fraction = animatedProgress)
+                .background(progressColor)
+        )
     }
 }
 

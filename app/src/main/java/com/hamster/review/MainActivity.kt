@@ -42,7 +42,6 @@ import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
-import androidx.navigation.toRoute
 import com.airbnb.lottie.compose.LottieAnimation
 import com.airbnb.lottie.compose.LottieCompositionSpec
 import com.airbnb.lottie.compose.LottieConstants
@@ -53,7 +52,7 @@ import com.hamster.review.compose.scaleOutExit
 import com.hamster.review.compose.slideInWithScaleEnter
 import com.hamster.review.compose.slideOutWithScalePopExit
 import com.hamster.review.screen.MainScreen
-import com.hamster.review.screen.ReviewScreenNew
+import com.hamster.review.screen.ReviewScreen
 import com.kyant.backdrop.backdrops.layerBackdrop
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 import com.kyant.backdrop.drawBackdrop
@@ -98,7 +97,7 @@ class MainActivity : FragmentActivity() {
                         saveState = true // 保留滚动状态
                     }
                     launchSingleTop = true // 同一个页面不会创建新的实例
-                    restoreState = true // 恢复之前的状态
+
                 }
             }
 
@@ -160,13 +159,12 @@ class MainActivity : FragmentActivity() {
                                         popEnterTransition = { scaleInPopEnter() },
                                         popExitTransition = { slideOutWithScalePopExit() }
                                     ) {
-                                        ReviewScreenNew(
-                                              subjectId = it.toRoute<Review>().subjectId,
-                                            setTopbarTitle = {
-                                                mainViewModel.topbarTitle = it
+                                        ReviewScreen(
+                                            setTopbarTitle = { title ->
+                                                mainViewModel.topbarTitle = title
                                             },
-                                            onNavigate = {
-                                                navController.simpleNavigate(it)
+                                            onNavigate = { route ->
+                                                navController.simpleNavigate(route)
                                             }
                                         )
                                     }

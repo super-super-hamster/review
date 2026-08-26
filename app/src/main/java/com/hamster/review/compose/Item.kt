@@ -290,7 +290,7 @@ fun ExplanationItem(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Icon(
-                    painter = painterResource(R.drawable.ic_tips),
+                    painter = painterResource(R.drawable.tips),
                     contentDescription = null,
                     modifier = Modifier.size(24.dp).padding(end = 8.dp)
                 )
