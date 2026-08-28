@@ -168,6 +168,60 @@ class ReviewViewModel(
         }
     }
 
+    fun saveEditedQuestion(
+        questionId: Long,
+        content: String,
+        answer: String?,
+        explanation: String,
+        options: List<Triple<Long, String, Boolean>>?
+    ) {
+        viewModelScope.launch {
+            repository.updateQuestion(
+                questionId = questionId,
+                content = content,
+                answer = answer,
+                explanation = explanation,
+                options = options?.map { Triple(it.first, it.second, it.third) }
+            )
+        }
+    }
+
+    fun deleteQuestion(questionId: Long) {
+        viewModelScope.launch {
+            repository.deleteQuestion(questionId)
+            _uiState.update { state ->
+                val newQueue = normalQueue.filterNot { it.question.id == questionId }
+                normalQueue.clear()
+                normalQueue.addAll(newQueue)
+                wrongQueue.removeAll { it.question.question.id == questionId }
+                if (state.currentQuestion?.question?.id == questionId) {
+                    val next = nextQuestion()
+                    if (next == null) {
+                        state.copy(
+                            currentQuestion = null,
+                            finished = true,
+                            completedToday = true
+                        )
+                    } else {
+                        state.copy(
+                            currentQuestion = next,
+                            answered = false,
+                            selectedOptionIds = emptySet(),
+                            showAnswer = false,
+                            lastResultCorrect = null,
+                            mastered = next.question.mastered,
+                            remainingCount = normalQueue.size + wrongQueue.size,
+                            wrongCount = wrongQueue.size
+                        )
+                    }
+                } else {
+                    state.copy(remainingCount = normalQueue.size + wrongQueue.size, wrongCount = wrongQueue.size)
+                }
+            }
+        }
+    }
+
+
     private fun loadQueue() {
         viewModelScope.launch {
             val due = repository.getDueQuestionDetailsOnce(subjectId)

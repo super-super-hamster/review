@@ -255,7 +255,6 @@ fun ProgressBar(
     modifier: Modifier = Modifier,
     progressColor: Color = colorResource(R.color.mikuGreen),
     trackColor: Color = colorResource(R.color.light_gray),
-    onClick: () -> Unit,
 ) {
     val animatedProgress by animateFloatAsState(
         targetValue = progress.coerceIn(0f, 1f),
@@ -265,12 +264,7 @@ fun ProgressBar(
     Box(
         modifier = modifier
             .clip(CircleShape)
-            .background(trackColor)
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null,
-                onClick = { onClick() }
-            ),
+            .background(trackColor),
     ) {
         Box(
             modifier = Modifier

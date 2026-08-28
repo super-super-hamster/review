@@ -15,6 +15,7 @@ interface SubjectDao {
     @Query(
         """
         SELECT subjects.*,
+               (SELECT COUNT(*) FROM questions WHERE subjectId = subjects.id) AS totalCount,
                CASE
                    WHEN EXISTS(
                        SELECT 1 FROM daily_subject_records d
@@ -38,7 +39,7 @@ interface SubjectDao {
                        WHERE q.subjectId = subjects.id
                          AND q.mastered = 0
                          AND s.dueDate <= :now
-                   ), :limit)
+                   ), subjects.dailyLimit)
                END AS todayCount
         FROM subjects
         ORDER BY subjects.sortOrder ASC, subjects.id ASC
@@ -46,8 +47,7 @@ interface SubjectDao {
     )
     fun observeSubjectsWithTodayCount(
         now: Long,
-        today: String,
-        limit: Int
+        today: String
     ): Flow<List<SubjectWithTodayCount>>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
@@ -55,6 +55,16 @@ interface SubjectDao {
 
     @Query("SELECT COUNT(*) FROM subjects")
     suspend fun count(): Int
+
+    @Query("SELECT dailyLimit FROM subjects WHERE id = :subjectId")
+    suspend fun getDailyLimit(subjectId: Long): Int
+
+    @Query("SELECT dailyLimit FROM subjects WHERE id = :subjectId")
+    fun observeDailyLimit(subjectId: Long): Flow<Int>
+
+    @Query("UPDATE subjects SET dailyLimit = :dailyLimit WHERE id = :subjectId")
+    suspend fun updateDailyLimit(subjectId: Long, dailyLimit: Int)
+
 }
 
 @Dao
@@ -128,6 +138,22 @@ interface QuestionDao {
 
     @Query("SELECT COUNT(*) FROM questions WHERE subjectId = :subjectId AND mastered = 0")
     fun observeUnmasteredCount(subjectId: Long): Flow<Int>
+
+    @Query("SELECT id FROM questions WHERE subjectId = :subjectId ORDER BY id ASC")
+    suspend fun getSubjectQuestionIds(subjectId: Long): List<Long>
+
+
+    @Query("UPDATE questions SET content = :content WHERE id = :questionId")
+    suspend fun updateQuestionContent(questionId: Long, content: String)
+
+    @Query("UPDATE questions SET answer = :answer WHERE id = :questionId")
+    suspend fun updateQuestionAnswer(questionId: Long, answer: String?)
+
+    @Query("UPDATE questions SET explanation = :explanation WHERE id = :questionId")
+    suspend fun updateQuestionExplanation(questionId: Long, explanation: String)
+
+    @Query("DELETE FROM questions WHERE id = :questionId")
+    suspend fun deleteQuestion(questionId: Long)
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAll(questions: List<QuestionEntity>): List<Long>
@@ -290,4 +316,10 @@ interface QuestionTagDao {
 interface QuestionOptionDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAll(options: List<QuestionOptionEntity>): List<Long>
+
+    @Query("UPDATE question_options SET content = :content WHERE id = :optionId")
+    suspend fun updateContent(optionId: Long, content: String)
+
+    @Query("UPDATE question_options SET isCorrect = :isCorrect WHERE id = :optionId")
+    suspend fun updateCorrect(optionId: Long, isCorrect: Boolean)
 }

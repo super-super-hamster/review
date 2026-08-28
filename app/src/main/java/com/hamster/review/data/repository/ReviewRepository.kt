@@ -23,6 +23,7 @@ import java.time.LocalDate
 import java.time.ZoneId
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flatMapLatest
 
 class ReviewRepository(
     private val db: AppDatabase
@@ -41,8 +42,7 @@ class ReviewRepository(
         val today = LocalDate.now().toString()
         return subjectDao.observeSubjectsWithTodayCount(
             now = System.currentTimeMillis(),
-            today = today,
-            limit = DAILY_REVIEW_LIMIT_PER_SUBJECT
+            today = today
         )
     }
 
@@ -171,6 +171,94 @@ class ReviewRepository(
         )
     }
 
+    suspend fun getSubjectDailyLimit(subjectId: Long): Int {
+        return subjectDao.getDailyLimit(subjectId)
+    }
+
+    suspend fun setSubjectDailyLimit(subjectId: Long, newLimit: Int) {
+        subjectDao.updateDailyLimit(subjectId, newLimit)
+
+        val today = LocalDate.now().toString()
+        val record = dailySubjectRecordDao.get(subjectId, today) ?: return
+        if (record.completed) return
+
+        if (newLimit <= record.completedCount) {
+            dailySubjectRecordDao.upsert(
+                record.copy(
+                    completed = true,
+                    completedAt = System.currentTimeMillis()
+                )
+            )
+            return
+        }
+
+        val existingQuestions = dailySubjectQuestionDao.getForDate(subjectId, today)
+        val existingIds = existingQuestions.map { it.questionId }.toMutableSet()
+        val need = newLimit - existingIds.size
+
+        if (need > 0) {
+            val allQuestionIds = questionDao.getSubjectQuestionIds(subjectId)
+            val newIds = allQuestionIds
+                .filterNot { it in existingIds }
+                .take(need)
+
+            val reusedIds = if (newIds.size < need) {
+                existingIds.take(need - newIds.size)
+            } else {
+                emptyList()
+            }
+
+            val selectedIds = newIds + reusedIds
+            if (selectedIds.isNotEmpty()) {
+                dailySubjectQuestionDao.insertAll(
+                    selectedIds.map { questionId ->
+                        DailySubjectQuestionEntity(
+                            subjectId = subjectId,
+                            date = today,
+                            questionId = questionId,
+                            completed = false,
+                            wrongPending = false
+                        )
+                    }
+                )
+                existingIds.addAll(selectedIds)
+            }
+        }
+
+        dailySubjectRecordDao.upsert(
+            record.copy(
+                pushedCount = existingIds.size,
+                completed = false,
+                completedAt = null
+            )
+        )
+    }
+
+    suspend fun updateQuestion(
+        questionId: Long,
+        content: String,
+        answer: String?,
+        explanation: String,
+        options: List<Triple<Long, String, Boolean>>?
+    ) {
+        db.withTransaction {
+            questionDao.updateQuestionContent(questionId, content)
+            questionDao.updateQuestionAnswer(questionId, answer)
+            questionDao.updateQuestionExplanation(questionId, explanation)
+            options?.forEach { (optionId, text, correct) ->
+                questionOptionDao.updateContent(optionId, text)
+                questionOptionDao.updateCorrect(optionId, correct)
+            }
+        }
+    }
+
+    suspend fun deleteQuestion(questionId: Long) {
+        db.withTransaction {
+            questionDao.deleteQuestion(questionId)
+        }
+    }
+
+
     suspend fun getSubjectCurrentMonthDailyRecordsOnce(subjectId: Long): List<DailyRecordEntity> {
         return observeSubjectCurrentMonthDailyRecords(subjectId).first()
     }
@@ -185,19 +273,23 @@ class ReviewRepository(
     }
 
 
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
     fun observeDueQuestionDetails(subjectId: Long): Flow<List<QuestionDetail>> {
-        return questionDao.observeDueQuestionDetails(
-            subjectId = subjectId,
-            now = System.currentTimeMillis(),
-            limit = DAILY_REVIEW_LIMIT_PER_SUBJECT
-        )
+        return subjectDao.observeDailyLimit(subjectId).flatMapLatest { limit ->
+            questionDao.observeDueQuestionDetails(
+                subjectId = subjectId,
+                now = System.currentTimeMillis(),
+                limit = limit
+            )
+        }
     }
 
     suspend fun getDueQuestionDetailsOnce(subjectId: Long): List<QuestionDetail> {
+        val limit = subjectDao.getDailyLimit(subjectId)
         return questionDao.observeDueQuestionDetails(
             subjectId = subjectId,
             now = System.currentTimeMillis(),
-            limit = DAILY_REVIEW_LIMIT_PER_SUBJECT
+            limit = limit
         ).first()
     }
 

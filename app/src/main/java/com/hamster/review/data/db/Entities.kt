@@ -19,7 +19,8 @@ import com.hamster.review.data.model.QuestionType
 data class SubjectEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val name: String,
-    val sortOrder: Int = 0
+    val sortOrder: Int = 0,
+    @ColumnInfo(defaultValue = "10") val dailyLimit: Int = 10
 )
 
 @Entity(
@@ -272,5 +273,6 @@ data class QuestionDetail(
 
 data class SubjectWithTodayCount(
     @Embedded val subject: SubjectEntity,
-    val todayCount: Int = 0
+    val todayCount: Int = 0,
+    val totalCount: Int = 0
 )

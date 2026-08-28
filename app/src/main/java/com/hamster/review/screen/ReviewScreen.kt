@@ -5,6 +5,7 @@ import androidx.annotation.DrawableRes
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
@@ -22,6 +23,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -41,6 +43,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.unit.IntSize
 import kotlinx.coroutines.launch
@@ -57,6 +60,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.hamster.review.Main
+import com.hamster.review.compose.InquiryDialog
 import com.hamster.review.compose.ItemGroup
 import com.hamster.review.compose.PageColumn
 import com.hamster.review.compose.rememberSharedTiltState
@@ -162,6 +166,7 @@ fun ReviewScreen(
 
             else -> {
                 val question = state.currentQuestion ?: return@PageColumn
+                var isEditing by remember { mutableStateOf(false) }
 
                 Column(modifier = Modifier.fillMaxSize()) {
                     Box(
@@ -180,18 +185,27 @@ fun ReviewScreen(
                             question = question,
                             state = state,
                             onSelectOption = viewModel::selectOption,
-                            onToggleMastered = viewModel::toggleMastered
+                            onToggleMastered = viewModel::toggleMastered,
+                            onSaveEdited = viewModel::saveEditedQuestion,
+                            onDeleteQuestion = viewModel::deleteQuestion,
+                            isEditing = isEditing,
+                            onEditingChange = { isEditing = it },
                         )
                     }
 
                     ActionButtons(
                         question = question,
                         state = state,
+                          editing = isEditing,
                         onSubmitChoice = viewModel::submitChoice,
                         onRevealAnswer = viewModel::revealAnswer,
                         onSelfAssess = viewModel::selfAssess,
                         onNext = {
-                            animateExitAndNext(state.lastResultCorrect ?: true)
+                            if (isEditing) {
+                                isEditing = false
+                            } else {
+                                animateExitAndNext(state.lastResultCorrect ?: true)
+                            }
                         }
                     )
 
@@ -208,7 +222,11 @@ private fun QuestionCard(
     question: QuestionDetail,
     state: ReviewUiState,
     onSelectOption: (Long) -> Unit,
-    onToggleMastered: () -> Unit
+    onToggleMastered: () -> Unit,
+    onSaveEdited: (Long, String, String?, String, List<Triple<Long, String, Boolean>>?) -> Unit,
+    onDeleteQuestion: (Long) -> Unit,
+    isEditing: Boolean,
+    onEditingChange: (Boolean) -> Unit
 ) {
     ItemGroup(
         modifier = modifier,
@@ -222,53 +240,139 @@ private fun QuestionCard(
             QuestionType.MULTIPLE_CHOICE -> "多选题"
         }
 
-        var isEditing by remember { mutableStateOf(false) }
+        var showSaveDialog by remember { mutableStateOf(false) }
+        var showDeleteDialog by remember { mutableStateOf(false) }
+        var editContent by remember(question.question.id) { mutableStateOf(question.question.content) }
+        var editAnswer by remember(question.question.id) { mutableStateOf(question.question.answer ?: "") }
+        var editExplanation by remember(question.question.id) { mutableStateOf(question.question.explanation) }
+        var editOptions by remember(question.question.id) {
+            mutableStateOf(question.options.map { Triple(it.id, it.content, it.isCorrect) })
+        }
+        var editingField by remember { mutableStateOf<String?>(null) }
+        var editingOptionId by remember { mutableStateOf<Long?>(null) }
+
+        BackHandler(enabled = isEditing) {
+            onEditingChange(false)
+        }
 
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.End
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            if (state.answered) {
-                state.lastResultCorrect?.let { correct ->
-                    Text(
-                        text = if (correct) "回答正确" else "回答错误",
-                        color = if (correct) colorResource(R.color.btn_confirm) else colorResource(R.color.btn_cancel),
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(top = 12.dp)
+            Text(
+                text = if (state.answered) {
+                    if (state.lastResultCorrect == true) "回答正确" else "回答错误"
+                } else {
+                    questionTypeName
+                },
+                color = if (state.lastResultCorrect == true) colorResource(R.color.btn_confirm) else colorResource(R.color.red),
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(top = 12.dp)
+            )
+
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (state.answered) {
+
+                    ExpandableCapsule(
+                        text = if (state.mastered) "已掌握" else "已取消",
+                        iconRes = if (state.mastered) R.drawable.check_circle_line else R.drawable.minus_circle_line,
+                        onClick = onToggleMastered
                     )
-                }
 
-                ExpandableCapsule(
-                    text = if (state.mastered) "已掌握" else "已取消",
-                    iconRes = if (state.mastered) R.drawable.check_circle_line else R.drawable.minus_circle_line,
-                    onClick = onToggleMastered
-                )
-
-                IconButton(
-                    onClick = {
-                        // TODO: 编辑题目开关
-                        isEditing = !isEditing
+                    IconButton(
+                        onClick = {
+                            if (isEditing) {
+                                showSaveDialog = true
+                            } else {
+                                onEditingChange(true)
+                            }
+                        }
+                    ) {
+                        Icon(
+                            modifier = Modifier.size(24.dp),
+                            painter = painterResource(R.drawable.edit_line),
+                            tint = if (isEditing) colorResource(R.color.mikuGreen) else Color.Black,
+                            contentDescription = "编辑题目"
+                        )
                     }
-                ) {
-                    Icon(
-                        modifier = Modifier.size(36.dp),
-                        painter = painterResource(R.drawable.edit_line),
-                        tint = if (isEditing) colorResource(R.color.mikuGreen) else Color.Black,
-                        contentDescription = "编辑题目"
-                    )
                 }
-            } else {
-                Text(
-                    text = questionTypeName,
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(top = 12.dp)
-                )
             }
         }
 
-        MarkdownContent(question.question.content, fontSize = 20.sp)
+        if (showSaveDialog) {
+            InquiryDialog(
+                title = "保存修改",
+                content = "是否保存对题目的修改？",
+                confirmText = "保存",
+                onDismissRequest = {
+                    showSaveDialog = false
+                    onEditingChange(false)
+                },
+                onCancel = {
+                    showSaveDialog = false
+                    onEditingChange(false)
+                },
+                onConfirm = {
+                    onSaveEdited(
+                        question.question.id,
+                        editContent,
+                        if (question.question.type == QuestionType.FILL_BLANK) editAnswer else question.question.answer,
+                        editExplanation,
+                        editOptions
+                    )
+                    showSaveDialog = false
+                    onEditingChange(false)
+                    true
+                }
+            )
+        }
+
+        if (showDeleteDialog) {
+            InquiryDialog(
+                title = "删除题目",
+                content = "确定删除该题目吗？",
+                confirmText = "删除",
+                confirmColor = colorResource(R.color.red),
+                onDismissRequest = { showDeleteDialog = false },
+                onCancel = { showDeleteDialog = false },
+                onConfirm = {
+                    onDeleteQuestion(question.question.id)
+                    showDeleteDialog = false
+                    onEditingChange(false)
+                    true
+                }
+            )
+        }
+
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(
+                    indication = null,
+                    interactionSource = remember { MutableInteractionSource() }
+                ) {
+                    editingField = null
+                    editingOptionId = null
+                }
+        ) {
+
+        if (isEditing && editingField == "content") {
+            BasicTextField(
+                value = editContent,
+                onValueChange = { editContent = it },
+                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+            )
+        } else {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .then(if (isEditing) Modifier.clickable { editingField = "content" } else Modifier)
+            ) {
+                MarkdownContent(if (isEditing) editContent else question.question.content, fontSize = 20.sp)
+            }
+        }
 
         Spacer(modifier = Modifier.height(6.dp))
 
@@ -277,48 +381,124 @@ private fun QuestionCard(
             QuestionType.MULTIPLE_CHOICE,
             QuestionType.TRUE_FALSE -> {
                 val fixedOrder = question.question.type == QuestionType.TRUE_FALSE
-                val options = remember(question.question.id, fixedOrder) {
+                val displayOptions = remember(question.question.id, fixedOrder) {
                     if (fixedOrder) {
                         question.options.sortedBy { it.sortOrder }
                     } else {
                         question.options.shuffled()
                     }
                 }
-                options.forEach { option ->
-                    OptionItem(
-                        option = option,
-                        background = optionBackground(question, state, option),
-                        enabled = !state.answered,
-                        onClick = { onSelectOption(option.id) }
-                    )
+                val options = if (isEditing) {
+                    displayOptions.map { option ->
+                        val edit = editOptions.first { it.first == option.id }
+                        QuestionOptionEntity(
+                            questionId = question.question.id,
+                            id = edit.first,
+                            content = edit.second,
+                            isCorrect = edit.third,
+                            sortOrder = option.sortOrder
+                        )
+                    }
+                } else {
+                    displayOptions
+                }
+                options.forEachIndexed { index, option ->
+                    if (isEditing) {
+                        OptionItem(
+                            option = option,
+                            background = if (option.isCorrect) {
+                                colorResource(R.color.mikuGreen).copy(alpha = 0.8f)
+                            } else {
+                                Color.Transparent
+                            },
+                            enabled = true,
+                            onClick = {
+                                editingOptionId = null
+                                val newList = editOptions.toMutableList()
+                                if (question.question.type == QuestionType.MULTIPLE_CHOICE) {
+                                    newList[index] = newList[index].copy(third = !newList[index].third)
+                                } else {
+                                    newList.indices.forEach { i ->
+                                        newList[i] = newList[i].copy(third = i == index)
+                                    }
+                                }
+                                editOptions = newList
+                            },
+                            onDoubleTap = {
+                                if (question.question.type != QuestionType.TRUE_FALSE) {
+                                    editingOptionId = option.id
+                                }
+                            },
+                            editingText = if (editingOptionId == option.id) editOptions[index].second else null,
+                            onTextChange = if (editingOptionId == option.id) { newText ->
+                                editOptions = editOptions.toMutableList().also { list ->
+                                    list[index] = list[index].copy(second = newText)
+                                }
+                            } else null
+                        )
+                    } else {
+                        OptionItem(
+                            option = option,
+                            background = optionBackground(question, state, option),
+                            enabled = !state.answered,
+                            onClick = { onSelectOption(option.id) }
+                        )
+                    }
 
                     Spacer(modifier = Modifier.height(2.dp))
                 }
-
             }
 
             QuestionType.FILL_BLANK -> {
-                if (state.showAnswer) {
-                    question.question.answer?.let {
+                if (state.showAnswer || isEditing) {
+                    if (isEditing && editingField == "answer") {
+                        BasicTextField(
+                            value = editAnswer,
+                            onValueChange = { editAnswer = it },
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+                        )
+                    } else {
                         Text(
-                            text = "答案：$it",
+                            text = if (isEditing) "答案：$editAnswer" else "答案：${question.question.answer.orEmpty()}",
                             fontSize = 18.sp,
                             fontWeight = FontWeight.Bold,
-                            modifier = Modifier.padding(vertical = 12.dp)
+                            modifier = Modifier
+                                .padding(vertical = 12.dp)
+                                .then(if (isEditing) Modifier.clickable { editingField = "answer" } else Modifier)
                         )
                     }
                 }
             }
         }
 
-        if (state.answered) {
-            if (question.question.explanation.isNotBlank()) {
+        if (state.answered || isEditing) {
+            if (isEditing && editingField == "explanation") {
+                BasicTextField(
+                    value = editExplanation,
+                    onValueChange = { editExplanation = it },
+                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+                )
+            } else {
                 Text(
-                    text = "备注：${question.question.explanation}",
+                    text = if (isEditing) "备注：$editExplanation" else "备注：${question.question.explanation}",
                     fontSize = 14.sp,
-                    modifier = Modifier.padding(top = 8.dp)
+                    modifier = Modifier
+                        .padding(top = 8.dp)
+                        .then(if (isEditing) Modifier.clickable { editingField = "explanation" } else Modifier)
                 )
             }
+        }
+
+        if (isEditing) {
+            Spacer(modifier = Modifier.height(12.dp))
+            IconButton(onClick = { showDeleteDialog = true }) {
+                Icon(
+                    painter = painterResource(R.drawable.delete_line),
+                    contentDescription = "删除题目",
+                    tint = colorResource(R.color.red)
+                )
+            }
+        }
         }
 
     }
@@ -328,6 +508,7 @@ private fun QuestionCard(
 private fun ActionButtons(
     question: QuestionDetail,
     state: ReviewUiState,
+    editing: Boolean,
     onSubmitChoice: () -> Unit,
     onRevealAnswer: () -> Unit,
     onSelfAssess: (Boolean) -> Unit,
@@ -349,6 +530,7 @@ private fun ActionButtons(
                     border = BorderStroke(1.dp, Color.LightGray),
                     shape = squircleShape,
                     colors = ButtonDefaults.textButtonColors(colorResource(R.color.btn_confirm)),
+                    enabled = !editing,
                     onClick = onNext
                 ) {
                     Text("下一个", color = Color.Black)
@@ -380,7 +562,7 @@ private fun ActionButtons(
                             .weight(1f),
                         border = BorderStroke(1.dp, Color.LightGray),
                         shape = squircleShape,
-                        colors = ButtonDefaults.textButtonColors(colorResource(R.color.btn_cancel)),
+                        colors = ButtonDefaults.textButtonColors(colorResource(R.color.red)),
                         onClick = { onSelfAssess(false) }
                     ) {
                         Text("记错了", color = Color.Black)
@@ -422,27 +604,49 @@ private fun OptionItem(
     option: QuestionOptionEntity,
     background: Color,
     enabled: Boolean,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    onDoubleTap: (() -> Unit)? = null,
+    editingText: String? = null,
+    onTextChange: ((String) -> Unit)? = null
 ) {
+    val interactionModifier = if (onDoubleTap == null) {
+        Modifier.clickable(
+            enabled = enabled,
+            onClick = onClick,
+            indication = null,
+            interactionSource = remember { MutableInteractionSource() }
+        )
+    } else {
+        Modifier.pointerInput(option.id, enabled) {
+            detectTapGestures(
+                onTap = { if (enabled) onClick() },
+                onDoubleTap = { if (enabled) onDoubleTap.invoke() }
+            )
+        }
+    }
+
     Row(
         modifier = Modifier
 //            .height(48.dp)
             .fillMaxWidth()
             .clip(shape = squircleShape)
             .background(background)
-            .clickable(
-                enabled = enabled,
-                onClick = onClick,
-                indication = null,
-                interactionSource = remember { MutableInteractionSource() }
-            )
+            .then(interactionModifier)
             .padding(horizontal = 24.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        MarkdownContent(content = option.content, fontSize = 16.sp)
+        if (editingText != null && onTextChange != null) {
+            BasicTextField(
+                value = editingText,
+                onValueChange = onTextChange,
+                modifier = Modifier.weight(1f),
+                textStyle = MaterialTheme.typography.bodyLarge.copy(fontSize = 16.sp),
+            )
+        } else {
+            MarkdownContent(content = option.content, fontSize = 16.sp)
+        }
     }
 }
-
 @Composable
 private fun optionBackground(
     question: QuestionDetail,
@@ -464,7 +668,7 @@ private fun optionBackground(
             } else {
                 when {
                     option.isCorrect -> selectedColor
-                    selected -> colorResource(R.color.btn_cancel)
+                    selected -> colorResource(R.color.red)
                     else -> Color.Transparent
                 }
             }
@@ -473,7 +677,7 @@ private fun optionBackground(
         QuestionType.MULTIPLE_CHOICE -> {
             when {
                 option.isCorrect && selected -> selectedColor
-                !option.isCorrect && selected -> colorResource(R.color.btn_cancel)
+                !option.isCorrect && selected -> colorResource(R.color.red)
                 option.isCorrect && !selected -> colorResource(R.color.yellow)
                 else -> Color.Transparent
             }
@@ -579,6 +783,7 @@ fun ExpandableCapsule(
             contentAlignment = Alignment.Center
         ) {
             Icon(
+                modifier = Modifier.size(24.dp),
                 painter = painterResource(id = iconRes),
                 contentDescription = null,
                 tint = Color.Black

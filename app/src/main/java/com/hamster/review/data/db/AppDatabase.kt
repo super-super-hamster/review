@@ -21,7 +21,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         DailySubjectQuestionEntity::class,
         DailyRecordEntity::class
     ],
-    version = 4,
+    version = 5,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -102,6 +102,15 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "ALTER TABLE `subjects` ADD COLUMN `dailyLimit` INTEGER NOT NULL DEFAULT 10"
+                )
+            }
+        }
+
+
 
 
 
@@ -127,7 +136,7 @@ abstract class AppDatabase : RoomDatabase() {
                     }
 
                     builder
-                        .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+                        .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
                         .fallbackToDestructiveMigration()
                         .build()
                         .also { INSTANCE = it }

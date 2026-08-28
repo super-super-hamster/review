@@ -32,6 +32,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun setSubjectDailyLimit(subjectId: Long, dailyLimit: Int) {
+        viewModelScope.launch {
+            repository.setSubjectDailyLimit(subjectId, dailyLimit)
+        }
+    }
+
+
     private var _topbarTitle by mutableStateOf("首页")
     var topbarTitle: String
         get() = _topbarTitle

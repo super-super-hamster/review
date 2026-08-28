@@ -227,6 +227,7 @@ fun InquiryDialog(
     content: String,
     cancelText: String = "取消",
     confirmText: String = "确认",
+    confirmColor: Color = colorResource(R.color.btn_confirm),
     onCancel: () -> Unit = {},
     onDismissRequest: () -> Unit,
     onConfirm: () -> Boolean
@@ -235,6 +236,7 @@ fun InquiryDialog(
         title = title,
         cancelText = cancelText,
         confirmText = confirmText,
+        confirmColor = confirmColor,
         onCancel = { onCancel() },
         onDismissRequest = { onDismissRequest() },
         onConfirm = { onConfirm() }
@@ -505,6 +507,7 @@ fun ConfirmDialog(
     onConfirm: () -> Boolean,
     cancelText: String = "取消",
     confirmText: String = "确认",
+    confirmColor: Color = colorResource(R.color.btn_confirm),
     content: @Composable () -> Unit
 ) {
     val confirmAction = {
@@ -563,7 +566,7 @@ fun ConfirmDialog(
                         .height(42.dp),
                     border = BorderStroke(1.dp, Color.LightGray),
                     shape = squircleShape,
-                    colors = ButtonDefaults.textButtonColors(colorResource(R.color.btn_confirm)),
+                    colors = ButtonDefaults.textButtonColors(confirmColor),
                     onClick = confirmAction
                 ) {
                     Text(text = confirmText, color = colorResource(R.color.text))

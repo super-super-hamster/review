@@ -143,6 +143,7 @@ class MainActivity : FragmentActivity() {
                                     ) {
                                         MainScreen(
                                               subjects = subjects,
+                                              onSetDailyLimit = mainViewModel::setSubjectDailyLimit,
 
                                             setTopbarTitle = {
                                                 mainViewModel.topbarTitle = it
