@@ -56,6 +56,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -71,16 +72,11 @@ fun EditTextDialog(
     singleLine: Boolean = false,
     maxLength: Int = -1,
     type: String = "String",
+    validate: (String) -> String? = { null },
     onCancel: () -> Unit = {},
     onDismissRequest: () -> Unit,
     onConfirm: (String) -> Boolean
 ) {
-    val safeInitialValue = if (maxLength != -1 && initialValue.length > maxLength) {
-        initialValue.substring(0, maxLength)
-    } else {
-        initialValue
-    }
-
     var tempText by remember(initialValue) {
         mutableStateOf(
             TextFieldValue(
@@ -89,6 +85,7 @@ fun EditTextDialog(
             )
         )
     }
+    var errorText by remember { mutableStateOf<String?>(null) }
 
     val focusRequester = remember { FocusRequester() }
     val keyboardController = LocalSoftwareKeyboardController.current
@@ -105,7 +102,10 @@ fun EditTextDialog(
     }
 
     val submitAction = {
-        if (onConfirm(tempText.text)) {
+        val error = validate(tempText.text)
+        if (error != null) {
+            errorText = error
+        } else if (onConfirm(tempText.text)) {
             onDismissRequest()
         }
     }
@@ -139,24 +139,40 @@ fun EditTextDialog(
 
             Spacer(modifier = Modifier.height(16.dp))
 
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(20.dp)
+                    .padding(horizontal = 4.dp),
+                contentAlignment = Alignment.CenterStart
+            ) {
+                errorText?.let { message ->
+                    Text(
+                        text = message,
+                        fontSize = 12.sp,
+                        color = Color.Red,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+
             OutlinedTextField(
                 value = tempText,
                 onValueChange = { input ->
                     val inputText = input.text
-                    if (maxLength == -1 || inputText.length <= maxLength) {
+                    val accepted = if (maxLength == -1 || inputText.length <= maxLength) {
                         when (type) {
-                            "Int" -> {
-                                if (inputText.all { it.isDigit() }) {
-                                    tempText = input
-                                }
-                            }
-                            "Float" -> {
-                                if (inputText.matches(Regex("^\\d*\\.?\\d*$"))) {
-                                    tempText = input
-                                }
-                            }
-                            else -> tempText = input
+                            "Int" -> inputText.all { it.isDigit() }
+                            "Float" -> inputText.matches(Regex("^\\d*\\.?\\d*$"))
+                            else -> true
                         }
+                    } else {
+                        false
+                    }
+                    if (accepted) {
+                        errorText = null
+                        tempText = input
                     }
                 },
                 placeholder = { Text(text = hint, color = Color.Gray) },
@@ -186,7 +202,7 @@ fun EditTextDialog(
                 colors = outlinedTextFieldColors()
             )
 
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(12.dp))
 
             Row(
                 modifier = Modifier

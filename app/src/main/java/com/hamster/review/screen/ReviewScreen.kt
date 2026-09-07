@@ -76,6 +76,8 @@ import org.intellij.markdown.ast.getTextInNode
 import com.hamster.review.R
 import com.hamster.review.compose.squircleShape
 import com.hamster.review.data.db.DailyRecordEntity
+import com.hamster.review.viewModel.ReviewUiState
+import com.hamster.review.viewModel.ReviewViewModel
 import java.time.LocalDate
 import java.time.YearMonth
 import kotlin.math.ceil
@@ -145,6 +147,22 @@ fun ReviewScreen(
                             records = state.dailyRecords,
                             modifier = Modifier.padding(horizontal = 24.dp, vertical = 12.dp)
                         )
+
+                        if (state.canAnotherGroup) {
+                            Spacer(modifier = Modifier.height(16.dp))
+                            Button(
+                                modifier = Modifier
+                                    .padding(horizontal = 24.dp)
+                                    .fillMaxWidth()
+                                    .height(48.dp),
+                                border = BorderStroke(1.dp, Color.LightGray),
+                                shape = squircleShape,
+                                colors = ButtonDefaults.textButtonColors(colorResource(R.color.btn_confirm)),
+                                onClick = { viewModel.startAnotherGroup() }
+                            ) {
+                                Text("再来一组", color = Color.Black)
+                            }
+                        }
                     }
                 }
 //                Column(modifier = Modifier.fillMaxSize()) {
@@ -196,7 +214,7 @@ fun ReviewScreen(
                     ActionButtons(
                         question = question,
                         state = state,
-                          editing = isEditing,
+                        editing = isEditing,
                         onSubmitChoice = viewModel::submitChoice,
                         onRevealAnswer = viewModel::revealAnswer,
                         onSelfAssess = viewModel::selfAssess,
@@ -266,7 +284,12 @@ private fun QuestionCard(
                 } else {
                     questionTypeName
                 },
-                color = if (state.lastResultCorrect == true) colorResource(R.color.btn_confirm) else colorResource(R.color.red),
+                color = if (state.answered) {
+                    if (state.lastResultCorrect == true)
+                        colorResource(R.color.btn_confirm)
+                    else
+                        colorResource(R.color.red)
+                } else Color.Black,
                 fontSize = 18.sp,
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier.padding(top = 12.dp)
@@ -358,147 +381,158 @@ private fun QuestionCard(
                 }
         ) {
 
-        if (isEditing && editingField == "content") {
-            BasicTextField(
-                value = editContent,
-                onValueChange = { editContent = it },
-                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
-            )
-        } else {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .then(if (isEditing) Modifier.clickable { editingField = "content" } else Modifier)
-            ) {
-                MarkdownContent(if (isEditing) editContent else question.question.content, fontSize = 20.sp)
-            }
-        }
-
-        Spacer(modifier = Modifier.height(6.dp))
-
-        when (question.question.type) {
-            QuestionType.SINGLE_CHOICE,
-            QuestionType.MULTIPLE_CHOICE,
-            QuestionType.TRUE_FALSE -> {
-                val fixedOrder = question.question.type == QuestionType.TRUE_FALSE
-                val displayOptions = remember(question.question.id, fixedOrder) {
-                    if (fixedOrder) {
-                        question.options.sortedBy { it.sortOrder }
-                    } else {
-                        question.options.shuffled()
-                    }
-                }
-                val options = if (isEditing) {
-                    displayOptions.map { option ->
-                        val edit = editOptions.first { it.first == option.id }
-                        QuestionOptionEntity(
-                            questionId = question.question.id,
-                            id = edit.first,
-                            content = edit.second,
-                            isCorrect = edit.third,
-                            sortOrder = option.sortOrder
-                        )
-                    }
-                } else {
-                    displayOptions
-                }
-                options.forEachIndexed { index, option ->
-                    if (isEditing) {
-                        OptionItem(
-                            option = option,
-                            background = if (option.isCorrect) {
-                                colorResource(R.color.mikuGreen).copy(alpha = 0.8f)
-                            } else {
-                                Color.Transparent
-                            },
-                            enabled = true,
-                            onClick = {
-                                editingOptionId = null
-                                val newList = editOptions.toMutableList()
-                                if (question.question.type == QuestionType.MULTIPLE_CHOICE) {
-                                    newList[index] = newList[index].copy(third = !newList[index].third)
-                                } else {
-                                    newList.indices.forEach { i ->
-                                        newList[i] = newList[i].copy(third = i == index)
-                                    }
-                                }
-                                editOptions = newList
-                            },
-                            onDoubleTap = {
-                                if (question.question.type != QuestionType.TRUE_FALSE) {
-                                    editingOptionId = option.id
-                                }
-                            },
-                            editingText = if (editingOptionId == option.id) editOptions[index].second else null,
-                            onTextChange = if (editingOptionId == option.id) { newText ->
-                                editOptions = editOptions.toMutableList().also { list ->
-                                    list[index] = list[index].copy(second = newText)
-                                }
-                            } else null
-                        )
-                    } else {
-                        OptionItem(
-                            option = option,
-                            background = optionBackground(question, state, option),
-                            enabled = !state.answered,
-                            onClick = { onSelectOption(option.id) }
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.height(2.dp))
-                }
-            }
-
-            QuestionType.FILL_BLANK -> {
-                if (state.showAnswer || isEditing) {
-                    if (isEditing && editingField == "answer") {
-                        BasicTextField(
-                            value = editAnswer,
-                            onValueChange = { editAnswer = it },
-                            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
-                        )
-                    } else {
-                        Text(
-                            text = if (isEditing) "答案：$editAnswer" else "答案：${question.question.answer.orEmpty()}",
-                            fontSize = 18.sp,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier
-                                .padding(vertical = 12.dp)
-                                .then(if (isEditing) Modifier.clickable { editingField = "answer" } else Modifier)
-                        )
-                    }
-                }
-            }
-        }
-
-        if (state.answered || isEditing) {
-            if (isEditing && editingField == "explanation") {
+            if (isEditing && editingField == "content") {
                 BasicTextField(
-                    value = editExplanation,
-                    onValueChange = { editExplanation = it },
-                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+                    value = editContent,
+                    onValueChange = { editContent = it },
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
                 )
             } else {
-                Text(
-                    text = if (isEditing) "备注：$editExplanation" else "备注：${question.question.explanation}",
-                    fontSize = 14.sp,
+                Box(
                     modifier = Modifier
-                        .padding(top = 8.dp)
-                        .then(if (isEditing) Modifier.clickable { editingField = "explanation" } else Modifier)
-                )
+                        .fillMaxWidth()
+                        .then(if (isEditing) Modifier.clickable { editingField = "content" } else Modifier)
+                ) {
+                    MarkdownContent(if (isEditing) editContent else question.question.content, fontSize = 20.sp)
+                }
             }
-        }
 
-        if (isEditing) {
-            Spacer(modifier = Modifier.height(12.dp))
-            IconButton(onClick = { showDeleteDialog = true }) {
-                Icon(
-                    painter = painterResource(R.drawable.delete_line),
-                    contentDescription = "删除题目",
-                    tint = colorResource(R.color.red)
-                )
+            Spacer(modifier = Modifier.height(6.dp))
+
+            when (question.question.type) {
+                QuestionType.SINGLE_CHOICE,
+                QuestionType.MULTIPLE_CHOICE,
+                QuestionType.TRUE_FALSE -> {
+                    val fixedOrder = question.question.type == QuestionType.TRUE_FALSE
+                    val displayOptions = remember(question.question.id, fixedOrder) {
+                        if (fixedOrder) {
+                            question.options.sortedBy { it.sortOrder }
+                        } else {
+                            question.options.shuffled()
+                        }
+                    }
+                    val options = if (isEditing) {
+                        displayOptions.map { option ->
+                            val edit = editOptions.first { it.first == option.id }
+                            QuestionOptionEntity(
+                                questionId = question.question.id,
+                                id = edit.first,
+                                content = edit.second,
+                                isCorrect = edit.third,
+                                sortOrder = option.sortOrder
+                            )
+                        }
+                    } else {
+                        displayOptions
+                    }
+                    options.forEachIndexed { index, option ->
+                        if (isEditing) {
+                            OptionItem(
+                                option = option,
+                                background = if (option.isCorrect) {
+                                    colorResource(R.color.mikuGreen).copy(alpha = 0.8f)
+                                } else {
+                                    Color.Transparent
+                                },
+                                enabled = true,
+                                onClick = {
+                                    editingOptionId = null
+                                    val newList = editOptions.toMutableList()
+                                    if (question.question.type == QuestionType.MULTIPLE_CHOICE) {
+                                        newList[index] = newList[index].copy(third = !newList[index].third)
+                                    } else {
+                                        newList.indices.forEach { i ->
+                                            newList[i] = newList[i].copy(third = i == index)
+                                        }
+                                    }
+                                    editOptions = newList
+                                },
+                                onDoubleTap = {
+                                    if (question.question.type != QuestionType.TRUE_FALSE) {
+                                        editingOptionId = option.id
+                                    }
+                                },
+                                editingText = if (editingOptionId == option.id) editOptions[index].second else null,
+                                onTextChange = if (editingOptionId == option.id) { newText ->
+                                    editOptions = editOptions.toMutableList().also { list ->
+                                        list[index] = list[index].copy(second = newText)
+                                    }
+                                } else null
+                            )
+                        } else {
+                            OptionItem(
+                                option = option,
+                                background = optionBackground(question, state, option),
+                                enabled = !state.answered,
+                                onClick = { onSelectOption(option.id) }
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(2.dp))
+                    }
+                }
+
+                QuestionType.FILL_BLANK -> {
+                    if (state.showAnswer || isEditing) {
+                        if (isEditing && editingField == "answer") {
+                            BasicTextField(
+                                value = editAnswer,
+                                onValueChange = { editAnswer = it },
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+                            )
+                        } else {
+                            Text(
+                                text = if (isEditing) "答案：\n$editAnswer" else "答案：\n${question.question.answer.orEmpty()}",
+                                fontSize = 18.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier
+                                    .padding(vertical = 12.dp)
+                                    .then(if (isEditing) Modifier.clickable { editingField = "answer" } else Modifier)
+                            )
+                        }
+                    }
+                }
             }
-        }
+
+            if (state.answered || isEditing) {
+                if (isEditing && editingField == "explanation") {
+                    BasicTextField(
+                        value = editExplanation,
+                        onValueChange = { editExplanation = it },
+                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+                    )
+                } else {
+                    Text(
+                        text = if (isEditing) "备注：$editExplanation" else "备注：${question.question.explanation}",
+                        fontSize = 14.sp,
+                        modifier = Modifier
+                            .padding(top = 8.dp)
+                            .then(if (isEditing) Modifier.clickable { editingField = "explanation" } else Modifier)
+                    )
+                }
+            }
+
+            if (isEditing) {
+                Spacer(modifier = Modifier.height(12.dp))
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                            onClick = { showDeleteDialog = true }
+                        )
+                        .padding(vertical = 8.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        painter = painterResource(R.drawable.delete_line),
+                        contentDescription = null,
+                        tint = colorResource(R.color.red),
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            }
         }
 
     }

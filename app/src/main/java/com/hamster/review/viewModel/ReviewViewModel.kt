@@ -1,4 +1,4 @@
-package com.hamster.review.screen
+package com.hamster.review.viewModel
 
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
@@ -27,6 +27,7 @@ data class ReviewUiState(
     val mastered: Boolean = false,
     val finished: Boolean = false,
     val completedToday: Boolean = false,
+    val canAnotherGroup: Boolean = false,
     val dailyRecords: List<DailyRecordEntity> = emptyList(),
     val remainingCount: Int = 0,
     val wrongCount: Int = 0
@@ -139,6 +140,7 @@ class ReviewViewModel(
                 repository.markSubjectCompleted(subjectId)
                 val records = repository.getSubjectCurrentMonthDailyRecordsOnce(subjectId)
                 _uiState.update { it.copy(dailyRecords = records) }
+                refreshCanAnotherGroup()
             }
         } else {
             _uiState.update {
@@ -222,9 +224,32 @@ class ReviewViewModel(
     }
 
 
+    /**
+     * 完成当天学习后「再来一组」：补一组当天还没刷过的题并回到答题状态。
+     */
+    fun startAnotherGroup() {
+        // 立即隐藏按钮，避免加载期间被重复点击
+        _uiState.update { it.copy(canAnotherGroup = false) }
+        viewModelScope.launch {
+            val pushed = repository.startAnotherGroup(subjectId)
+            if (pushed > 0) {
+                loadQueue()
+            } else {
+                // 没有可推的新候选，维持完成态并刷新按钮显隐
+                refreshCanAnotherGroup()
+            }
+        }
+    }
+
+    private fun refreshCanAnotherGroup() {
+        viewModelScope.launch {
+            val can = repository.hasMorePoolCandidates(subjectId)
+            _uiState.update { it.copy(canAnotherGroup = can) }
+        }
+    }
+
     private fun loadQueue() {
         viewModelScope.launch {
-            val due = repository.getDueQuestionDetailsOnce(subjectId)
             val alreadyCompleted = repository.isSubjectCompletedToday(subjectId)
             val dailyRecords = repository.getSubjectCurrentMonthDailyRecordsOnce(subjectId)
 
@@ -239,28 +264,35 @@ class ReviewViewModel(
                     completedToday = true,
                     dailyRecords = dailyRecords
                 )
+                refreshCanAnotherGroup()
                 questionStartTime = System.currentTimeMillis()
                 return@launch
             }
 
-            val record = repository.getOrCreateSubjectDailyRecord(subjectId, due.size)
-            repository.ensureDailySubjectQuestions(subjectId, due)
+            // 每天第一次进入时生成当天题目池；已有推送行则沿用（含错题待重答状态）
+            repository.prepareTodayPool(subjectId)
             val statuses = repository.getSubjectDailyQuestions(subjectId)
 
             val pending = statuses.filter { !it.completed }
-            val normalIds = pending.filter { !it.wrongPending }.map { it.questionId }.toSet()
-            val wrongIds = pending.filter { it.wrongPending }.map { it.questionId }.toSet()
-
             val allQuestions = repository.getQuestionDetailsByIds(statuses.map { it.questionId })
-            val normalQueueList = allQuestions.filter { it.question.id in normalIds }
-            val wrongQueueList = allQuestions.filter { it.question.id in wrongIds }
-            val queue = normalQueueList + wrongQueueList
+            val questionsById = allQuestions.associateBy { it.question.id }
 
-            normalQueue.addAll(queue)
+            // 保持插入顺序（到期题在前、新题在后）
+            normalQueue.addAll(
+                pending
+                    .filter { !it.wrongPending }
+                    .mapNotNull { questionsById[it.questionId] }
+            )
+            normalQueue.addAll(
+                pending
+                    .filter { it.wrongPending }
+                    .mapNotNull { questionsById[it.questionId] }
+            )
 
-            val shouldMarkCompleted = queue.isEmpty()
+            val shouldMarkCompleted = normalQueue.isEmpty()
             if (shouldMarkCompleted) {
                 repository.markSubjectCompleted(subjectId)
+                refreshCanAnotherGroup()
             }
 
             val completed = shouldMarkCompleted

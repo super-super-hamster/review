@@ -11,3 +11,9 @@ object Main : Route
 data class Review(
     val subjectId: Long
 ) : Route
+
+@Serializable
+data class AddQuestion(
+    val subjectId: Long,
+    val typeName: String
+) : Route

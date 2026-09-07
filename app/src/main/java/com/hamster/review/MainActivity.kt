@@ -25,6 +25,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -51,8 +52,10 @@ import com.hamster.review.compose.scaleInPopEnter
 import com.hamster.review.compose.scaleOutExit
 import com.hamster.review.compose.slideInWithScaleEnter
 import com.hamster.review.compose.slideOutWithScalePopExit
+import com.hamster.review.screen.AddQuestionScreen
 import com.hamster.review.screen.MainScreen
 import com.hamster.review.screen.ReviewScreen
+import com.hamster.review.viewModel.MainViewModel
 import com.kyant.backdrop.backdrops.layerBackdrop
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 import com.kyant.backdrop.drawBackdrop
@@ -106,13 +109,6 @@ class MainActivity : FragmentActivity() {
                 drawContent()
             }
 
-            var showBlur by remember { mutableStateOf(false) }
-            val blurRadius by animateDpAsState(
-                targetValue = if (showBlur) 8.dp else 0.dp,
-                animationSpec = tween(100),
-                label = "blur"
-            )
-
             var showTopBar by remember { mutableStateOf(true) }
 
             var showLoading by remember { mutableStateOf(false) }
@@ -121,6 +117,20 @@ class MainActivity : FragmentActivity() {
                 composition = loadingComposition,
                 iterations = LottieConstants.IterateForever
             )
+            fun setLoading(isLoading: Boolean) {
+                showLoading = isLoading
+            }
+
+            val blurRadius by animateDpAsState(
+                targetValue = if (showLoading) 8.dp else 0.dp,
+                animationSpec = tween(100),
+                label = "blur"
+            )
+
+            // 更新期间显示加载层
+            LaunchedEffect(mainViewModel.bankUpdateBusy) {
+                setLoading(mainViewModel.bankUpdateBusy)
+            }
 
             MaterialTheme {
                 CompositionLocalProvider( LocalOverscrollFactory provides null) { // 禁用边缘回弹和光晕效果
@@ -144,6 +154,9 @@ class MainActivity : FragmentActivity() {
                                         MainScreen(
                                               subjects = subjects,
                                               onSetDailyLimit = mainViewModel::setSubjectDailyLimit,
+                                              onAddSubject = mainViewModel::addSubject,
+                                              onDeleteSubject = mainViewModel::deleteSubject,
+                                              onUpdateOfficialBank = mainViewModel::updateOfficialBank,
 
                                             setTopbarTitle = {
                                                 mainViewModel.topbarTitle = it
@@ -169,6 +182,22 @@ class MainActivity : FragmentActivity() {
                                             }
                                         )
                                     }
+
+                                    composable<AddQuestion>(
+                                        enterTransition = { slideInWithScaleEnter() },
+                                        exitTransition = { scaleOutExit() },
+                                        popEnterTransition = { scaleInPopEnter() },
+                                        popExitTransition = { slideOutWithScalePopExit() }
+                                    ) {
+                                        AddQuestionScreen(
+                                            setTopbarTitle = { title ->
+                                                mainViewModel.topbarTitle = title
+                                            },
+                                            onNavigate = { route ->
+                                                navController.simpleNavigate(route)
+                                            }
+                                        )
+                                    }
                                 }
 
                                 // 高斯模糊层
@@ -184,12 +213,6 @@ class MainActivity : FragmentActivity() {
                                                     noiseFactor = 0f
                                                 )
                                             )
-                                            .clickable(
-                                                interactionSource = remember { MutableInteractionSource() },
-                                                indication = null
-                                            ) {
-                                                showBlur = false
-                                            }
                                     )
                                 }
 

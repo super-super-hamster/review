@@ -1,6 +1,7 @@
-package com.hamster.review
+package com.hamster.review.viewModel
 
 import android.app.Application
+import android.widget.Toast
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -35,6 +36,38 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun setSubjectDailyLimit(subjectId: Long, dailyLimit: Int) {
         viewModelScope.launch {
             repository.setSubjectDailyLimit(subjectId, dailyLimit)
+        }
+    }
+
+    fun addSubject(name: String) {
+        viewModelScope.launch {
+            repository.addSubject(name)
+        }
+    }
+
+    fun deleteSubject(subjectId: Long) {
+        viewModelScope.launch {
+            repository.deleteSubject(subjectId)
+        }
+    }
+
+    private var _bankUpdateBusy by mutableStateOf(false)
+
+    /** 是否正在更新官方题库。 */
+    val bankUpdateBusy: Boolean
+        get() = _bankUpdateBusy
+
+    /** 手动更新官方题库(GitHub Release)，结果用 Toast 提示。 */
+    fun updateOfficialBank() {
+        if (_bankUpdateBusy) return
+        viewModelScope.launch {
+            _bankUpdateBusy = true
+            try {
+                val message = repository.updateOfficialBankFromGitHub(getApplication())
+                Toast.makeText(getApplication(), message, Toast.LENGTH_LONG).show()
+            } finally {
+                _bankUpdateBusy = false
+            }
         }
     }
 

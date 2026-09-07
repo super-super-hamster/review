@@ -56,14 +56,23 @@ interface SubjectDao {
     @Query("SELECT COUNT(*) FROM subjects")
     suspend fun count(): Int
 
+    @Query("SELECT COUNT(*) FROM subjects WHERE name = :name")
+    suspend fun countByName(name: String): Int
+
+    @Query("SELECT MAX(sortOrder) FROM subjects")
+    suspend fun maxSortOrder(): Int?
+
     @Query("SELECT dailyLimit FROM subjects WHERE id = :subjectId")
     suspend fun getDailyLimit(subjectId: Long): Int
 
-    @Query("SELECT dailyLimit FROM subjects WHERE id = :subjectId")
-    fun observeDailyLimit(subjectId: Long): Flow<Int>
-
     @Query("UPDATE subjects SET dailyLimit = :dailyLimit WHERE id = :subjectId")
     suspend fun updateDailyLimit(subjectId: Long, dailyLimit: Int)
+
+    @Query("DELETE FROM subjects WHERE id = :subjectId")
+    suspend fun deleteById(subjectId: Long)
+
+    @Query("SELECT * FROM subjects ORDER BY sortOrder ASC, id ASC")
+    suspend fun getAll(): List<SubjectEntity>
 
 }
 
@@ -77,16 +86,44 @@ interface QuestionDao {
         INNER JOIN scheduler_state s ON s.questionId = q.id
         WHERE q.subjectId = :subjectId
           AND q.mastered = 0
+          AND s.state != 'NEW'
           AND s.dueDate <= :now
-        ORDER BY s.dueDate ASC, s.retrievability ASC
-        LIMIT :limit
+        ORDER BY s.dueDate ASC, s.retrievability ASC, q.id ASC
         """
     )
-    fun observeDueQuestionDetails(
-        subjectId: Long,
-        now: Long,
-        limit: Int
-    ): Flow<List<QuestionDetail>>
+    suspend fun getDuePoolQuestions(subjectId: Long, now: Long): List<QuestionDetail>
+
+    @Transaction
+    @Query(
+        """
+        SELECT q.*
+        FROM questions q
+        INNER JOIN scheduler_state s ON s.questionId = q.id
+        WHERE q.subjectId = :subjectId
+          AND q.mastered = 0
+          AND s.state = 'NEW'
+        ORDER BY q.createdAt ASC, q.id ASC
+        """
+    )
+    suspend fun getNewPoolQuestions(subjectId: Long): List<QuestionDetail>
+
+    @Query("SELECT COUNT(*) FROM questions WHERE subjectId = :subjectId AND mastered = 0")
+    suspend fun countUnmastered(subjectId: Long): Int
+
+    @Query(
+        """
+        SELECT COUNT(*)
+        FROM questions q
+        INNER JOIN scheduler_state s ON s.questionId = q.id
+        LEFT JOIN daily_subject_questions d
+               ON d.questionId = q.id AND d.subjectId = :subjectId AND d.date = :today
+        WHERE q.subjectId = :subjectId
+          AND q.mastered = 0
+          AND d.questionId IS NULL
+          AND ((s.state = 'NEW') OR (s.state != 'NEW' AND s.dueDate <= :now))
+        """
+    )
+    suspend fun countPoolCandidates(subjectId: Long, today: String, now: Long): Int
 
     @Transaction
     @Query("SELECT * FROM questions WHERE id = :questionId")
@@ -99,6 +136,34 @@ interface QuestionDao {
     @Transaction
     @Query("SELECT * FROM questions WHERE id IN (:ids)")
     suspend fun getQuestionDetailsByIds(ids: List<Long>): List<QuestionDetail>
+
+    @Transaction
+    @Query("SELECT * FROM questions ORDER BY id ASC")
+    suspend fun getAllQuestionDetails(): List<QuestionDetail>
+
+    @Query("SELECT * FROM questions WHERE officialId = :officialId LIMIT 1")
+    suspend fun getByOfficialId(officialId: Long): QuestionEntity?
+
+    @Query("SELECT * FROM questions WHERE officialId IS NOT NULL")
+    suspend fun getAllOfficial(): List<QuestionEntity>
+
+    /** 完整覆盖官方题目字段(不含 id/mastered/调度/日志)。type 传题型枚举名。 */
+    @Query(
+        """
+        UPDATE questions
+        SET subjectId = :subjectId, type = :type, content = :content,
+            answer = :answer, explanation = :explanation
+        WHERE id = :id
+        """
+    )
+    suspend fun updateQuestionFields(
+        id: Long,
+        subjectId: Long,
+        type: String,
+        content: String,
+        answer: String?,
+        explanation: String
+    )
 
 
     @Query(
@@ -135,13 +200,6 @@ interface QuestionDao {
 
     @Query("UPDATE questions SET mastered = :mastered, masteredAt = :masteredAt WHERE id = :questionId")
     suspend fun updateMastered(questionId: Long, mastered: Boolean, masteredAt: Long?)
-
-    @Query("SELECT COUNT(*) FROM questions WHERE subjectId = :subjectId AND mastered = 0")
-    fun observeUnmasteredCount(subjectId: Long): Flow<Int>
-
-    @Query("SELECT id FROM questions WHERE subjectId = :subjectId ORDER BY id ASC")
-    suspend fun getSubjectQuestionIds(subjectId: Long): List<Long>
-
 
     @Query("UPDATE questions SET content = :content WHERE id = :questionId")
     suspend fun updateQuestionContent(questionId: Long, content: String)
@@ -273,6 +331,7 @@ interface DailySubjectQuestionDao {
         """
         SELECT * FROM daily_subject_questions
         WHERE subjectId = :subjectId AND date = :date
+        ORDER BY rowid ASC
         """
     )
     suspend fun getForDate(subjectId: Long, date: String): List<DailySubjectQuestionEntity>
@@ -294,6 +353,14 @@ interface DailySubjectQuestionDao {
         completed: Boolean,
         wrongPending: Boolean
     )
+
+    @Query(
+        """
+        DELETE FROM daily_subject_questions
+        WHERE subjectId = :subjectId AND date = :date AND questionId IN (:ids)
+        """
+    )
+    suspend fun deleteByQuestionIds(subjectId: Long, date: String, ids: List<Long>)
 }
 
 
@@ -310,12 +377,18 @@ interface TagDao {
 interface QuestionTagDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAll(crossRefs: List<QuestionTagCrossRef>)
+
+    @Query("DELETE FROM question_tags WHERE questionId = :questionId")
+    suspend fun deleteByQuestionId(questionId: Long)
 }
 
 @Dao
 interface QuestionOptionDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAll(options: List<QuestionOptionEntity>): List<Long>
+
+    @Query("DELETE FROM question_options WHERE questionId = :questionId")
+    suspend fun deleteByQuestionId(questionId: Long)
 
     @Query("UPDATE question_options SET content = :content WHERE id = :optionId")
     suspend fun updateContent(optionId: Long, content: String)

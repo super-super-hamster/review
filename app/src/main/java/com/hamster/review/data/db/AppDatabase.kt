@@ -21,7 +21,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         DailySubjectQuestionEntity::class,
         DailyRecordEntity::class
     ],
-    version = 5,
+    version = 6,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -110,6 +110,15 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        // 5->6: questions 增加 officialId(官方题库编号)列，并把存量行回填为自身 id。
+        // 存量库里的题目都来自内置默认题库(官方内容)，id 即官方编号；之后官方更新按 officialId 对齐。
+        val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `questions` ADD COLUMN `officialId` INTEGER")
+                db.execSQL("UPDATE `questions` SET `officialId` = `id` WHERE `officialId` IS NULL")
+            }
+        }
+
 
 
 
@@ -136,7 +145,7 @@ abstract class AppDatabase : RoomDatabase() {
                     }
 
                     builder
-                        .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+                        .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
                         .fallbackToDestructiveMigration()
                         .build()
                         .also { INSTANCE = it }

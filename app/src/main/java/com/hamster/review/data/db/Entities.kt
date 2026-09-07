@@ -42,6 +42,8 @@ data class SubjectEntity(
 data class QuestionEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val subjectId: Long,
+    // 官方题库编号：官方题目有值(等于官方库中的题目 id)，用户自建题目为 null
+    val officialId: Long? = null,
     val type: QuestionType,
     val content: String,
     val answer: String? = null,
