@@ -459,6 +459,11 @@ class ReviewRepository(
         return questionDao.getQuestionDetailsByIds(ids)
     }
 
+    /** 取某科目全部已掌握题目（用于"已掌握题目测试"，随机顺序由调用方决定）。 */
+    suspend fun getMasteredQuestionsOnce(subjectId: Long): List<QuestionDetail> {
+        return questionDao.getMasteredQuestionDetails(subjectId)
+    }
+
     suspend fun cleanupOldReviewLogs(keepDays: Int = 30) {
         val cutoff = System.currentTimeMillis() - keepDays * 24L * 60L * 60L * 1000L
         reviewLogDao.deleteOlderThan(cutoff)

@@ -61,7 +61,7 @@ fun MainScreen(
     longPressSubject?.let { subject ->
         OptionDialog(
             title = subject.subject.name,
-            options = listOf("新增题目", "设置每日题目数量", "删除科目"),
+            options = listOf("新增题目", "设置每日题目数量", "删除科目", "已掌握题目测试"),
             initialSelections = setOf(0),
             singleSelect = true,
             onDismissRequest = { longPressSubject = null },
@@ -76,6 +76,9 @@ fun MainScreen(
                 }
                 if (2 in selected) {
                     deleteSubject = subject
+                }
+                if (3 in selected) {
+                    onNavigate(com.hamster.review.Review(subject.subject.id, "mastered_test"))
                 }
                 longPressSubject = null
             }
@@ -125,21 +128,28 @@ fun MainScreen(
         val subject = limitSubject
         if (subject != null) {
             val maxLimit = min(200, subject.totalCount.coerceAtLeast(10))
+            val currentLimit = subject.subject.dailyLimit.coerceIn(1, maxLimit)
             SliderDialog(
                 title = "设置每日题目数量",
                 content = "${subject.subject.name}：每日题目数量",
-                value = subject.subject.dailyLimit.toFloat(),
+                value = currentLimit.toFloat(),
                 onValueChange = { newValue ->
-                    val stepped = (newValue / 10f).roundToInt() * 10
+                    // 允许 1，其余保持 10 的步进
+                    val stepped = if (newValue < 5.5f) {
+                        1
+                    } else {
+                        ((newValue / 10f).roundToInt() * 10).coerceAtLeast(10)
+                    }
                     limitSubject = subject.copy(
-                        subject = subject.subject.copy(dailyLimit = stepped.coerceIn(10, maxLimit))
+                        subject = subject.subject.copy(dailyLimit = stepped.coerceIn(1, maxLimit))
                     )
                 },
-                valueRange = 10f..maxLimit.toFloat(),
+                valueRange = 1f..maxLimit.toFloat(),
                 onDismissRequest = { showLimitDialog = false },
                 onCancel = { showLimitDialog = false },
                 onConfirm = {
-                    val finalLimit = limitSubject?.subject?.dailyLimit ?: subject.subject.dailyLimit
+                    val finalLimit = (limitSubject?.subject?.dailyLimit ?: currentLimit)
+                        .coerceIn(1, maxLimit)
                     onSetDailyLimit(subject.subject.id, finalLimit)
                     showLimitDialog = false
                     true
@@ -180,6 +190,7 @@ fun MainScreen(
                     subjectName = subject.subject.name,
                     todayCount = subject.todayCount,
                     dailyLimit = subject.subject.dailyLimit,
+                    availableCount = subject.availableCount,
                     subjectId = subject.subject.id,
                     sharedTiltState = sharedTiltState,
                     onNavigate = onNavigate,
@@ -235,12 +246,17 @@ fun SubjectCard(
     subjectName: String,
     todayCount: Int,
     dailyLimit: Int,
+    availableCount: Int,
     subjectId: Long,
     sharedTiltState: SharedTiltState,
     onNavigate: (Route) -> Unit,
     setTopbarTitle: (String) -> Unit,
     onLongPress: () -> Unit
 ) {
+    // 当天目标 = min(每日数量, 未掌握题数)；为 0 时不显示进度与计数
+    val dailyTarget = min(dailyLimit, availableCount)
+    val remaining = todayCount.coerceIn(0, dailyTarget)
+
     ItemGroup(
         modifier = Modifier.combinedClickable(
             interactionSource = remember { MutableInteractionSource() },
@@ -262,20 +278,22 @@ fun SubjectCard(
             fontWeight = FontWeight.Bold
         )
 
-        Spacer(modifier = Modifier.height(4.dp))
+        if (dailyTarget > 0) {
+            Spacer(modifier = Modifier.height(4.dp))
 
-        Text(
-            modifier = Modifier.padding(start = 4.dp),
-            text = "${(dailyLimit - todayCount).coerceAtLeast(0)} / $dailyLimit",
-            fontSize = 12.sp,
-            fontWeight = FontWeight.Light
-        )
+            Text(
+                modifier = Modifier.padding(start = 4.dp),
+                text = "${dailyTarget - remaining} / $dailyTarget",
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Light
+            )
 
-        ProgressBar(
-            modifier = Modifier
-                .height(8.dp)
-                .fillMaxWidth(),
-            progress = if (dailyLimit == 0) 0f else (dailyLimit - todayCount).toFloat() / dailyLimit
-        )
+            ProgressBar(
+                modifier = Modifier
+                    .height(8.dp)
+                    .fillMaxWidth(),
+                progress = (dailyTarget - remaining).toFloat() / dailyTarget
+            )
+        }
     }
 }

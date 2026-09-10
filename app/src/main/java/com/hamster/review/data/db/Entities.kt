@@ -276,5 +276,6 @@ data class QuestionDetail(
 data class SubjectWithTodayCount(
     @Embedded val subject: SubjectEntity,
     val todayCount: Int = 0,
-    val totalCount: Int = 0
+    val totalCount: Int = 0,
+    val availableCount: Int = 0
 )

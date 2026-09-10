@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CenterAlignedTopAppBar
@@ -48,6 +49,7 @@ import com.airbnb.lottie.compose.LottieCompositionSpec
 import com.airbnb.lottie.compose.LottieConstants
 import com.airbnb.lottie.compose.animateLottieCompositionAsState
 import com.airbnb.lottie.compose.rememberLottieComposition
+import com.hamster.review.compose.RingProgress
 import com.hamster.review.compose.scaleInPopEnter
 import com.hamster.review.compose.scaleOutExit
 import com.hamster.review.compose.slideInWithScaleEnter
@@ -177,6 +179,7 @@ class MainActivity : FragmentActivity() {
                                             setTopbarTitle = { title ->
                                                 mainViewModel.topbarTitle = title
                                             },
+                                            setReviewProgress = mainViewModel::setReviewProgress,
                                             onNavigate = { route ->
                                                 navController.simpleNavigate(route)
                                             }
@@ -220,6 +223,18 @@ class MainActivity : FragmentActivity() {
                                 if (showTopBar) {
                                     CenterAlignedTopAppBar(
                                         title = { Text(text = mainViewModel.topbarTitle) },
+                                        actions = {
+                                            mainViewModel.reviewProgress?.let { progress ->
+                                                RingProgress(
+                                                    progress = progress,
+                                                    modifier = Modifier.padding(end = 6.dp),
+                                                    size = 36.dp,
+                                                    strokeWidth = 4.dp,
+                                                    text = "",
+                                                    onClick = {}
+                                                )
+                                            }
+                                        },
                                         colors = TopAppBarDefaults.topAppBarColors(
                                             containerColor = Color.Transparent,
                                             scrolledContainerColor = Color.Transparent

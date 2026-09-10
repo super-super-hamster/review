@@ -16,6 +16,8 @@ interface SubjectDao {
         """
         SELECT subjects.*,
                (SELECT COUNT(*) FROM questions WHERE subjectId = subjects.id) AS totalCount,
+               (SELECT COUNT(*) FROM questions q2
+                WHERE q2.subjectId = subjects.id AND q2.mastered = 0) AS availableCount,
                CASE
                    WHEN EXISTS(
                        SELECT 1 FROM daily_subject_records d
@@ -136,6 +138,10 @@ interface QuestionDao {
     @Transaction
     @Query("SELECT * FROM questions WHERE id IN (:ids)")
     suspend fun getQuestionDetailsByIds(ids: List<Long>): List<QuestionDetail>
+
+    @Transaction
+    @Query("SELECT * FROM questions WHERE subjectId = :subjectId AND mastered = 1 ORDER BY id ASC")
+    suspend fun getMasteredQuestionDetails(subjectId: Long): List<QuestionDetail>
 
     @Transaction
     @Query("SELECT * FROM questions ORDER BY id ASC")

@@ -78,4 +78,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         set(title) {
             _topbarTitle = title
         }
+
+    /** 顶栏环形进度（null = 不显示），仅 ReviewScreen 在栈上时由页面写入。 */
+    private var _reviewProgress by mutableStateOf<Float?>(null)
+    val reviewProgress: Float?
+        get() = _reviewProgress
+
+    fun setReviewProgress(value: Float?) {
+        _reviewProgress = value
+    }
 }

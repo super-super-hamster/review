@@ -9,7 +9,8 @@ object Main : Route
 
 @Serializable
 data class Review(
-    val subjectId: Long
+    val subjectId: Long,
+    val mode: String = "daily"
 ) : Route
 
 @Serializable

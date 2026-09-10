@@ -11,11 +11,15 @@ import com.hamster.review.data.model.QuestionType
 import com.hamster.review.data.repository.ReviewRepository
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlin.math.min
 
 data class ReviewUiState(
     val isLoading: Boolean = true,
@@ -30,7 +34,11 @@ data class ReviewUiState(
     val canAnotherGroup: Boolean = false,
     val dailyRecords: List<DailyRecordEntity> = emptyList(),
     val remainingCount: Int = 0,
-    val wrongCount: Int = 0
+    val wrongCount: Int = 0,
+    /** 已掌握测试中答错、被自动置为未掌握的题目数 */
+    val unmasteredCount: Int = 0,
+    /** 已掌握测试的题目总数（0 表示该科目没有已掌握题目） */
+    val testTotal: Int = 0
 )
 
 class ReviewViewModel(
@@ -39,10 +47,50 @@ class ReviewViewModel(
 ) : AndroidViewModel(application) {
 
     private val subjectId: Long = checkNotNull(savedStateHandle["subjectId"])
+    private val mode: String = savedStateHandle.get<String>("mode") ?: "daily"
+
+    /** 是否为"已掌握题目测试"模式：不读写每日数据，答错仅置为未掌握。 */
+    val isMasteredTest: Boolean = mode == "mastered_test"
+
     private val repository = ReviewRepository(AppDatabase.getInstance(application))
 
     private val _uiState = MutableStateFlow(ReviewUiState())
     val uiState: StateFlow<ReviewUiState> = _uiState.asStateFlow()
+
+    private val _masteredTestProgress = MutableStateFlow(0f)
+    private var masteredTestTotal = 0
+    private var masteredTestAnswered = 0
+
+    /**
+     * 顶栏环形进度：
+     * - 每日模式：与首页进度条同口径（已完成 / min(dailyLimit, 未掌握题数)）；
+     * - 测试模式：本次测试进度（已答题数 / 已掌握题总数）。
+     */
+    val todayProgress: StateFlow<Float> = if (isMasteredTest) {
+        _masteredTestProgress.asStateFlow()
+    } else {
+        repository
+            .observeSubjectsWithTodayCount()
+            .map { list -> list.firstOrNull { it.subject.id == subjectId } }
+            .map { subject ->
+                if (subject == null) {
+                    0f
+                } else {
+                    val target = min(subject.subject.dailyLimit, subject.availableCount)
+                    if (target <= 0) {
+                        0f
+                    } else {
+                        val remaining = subject.todayCount.coerceIn(0, target)
+                        ((target - remaining).toFloat() / target).coerceIn(0f, 1f)
+                    }
+                }
+            }
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(5_000),
+                initialValue = 0f
+            )
+    }
 
     private var questionStartTime = System.currentTimeMillis()
 
@@ -115,7 +163,8 @@ class ReviewViewModel(
         val state = _uiState.value
         val current = state.currentQuestion ?: return
         val correct = state.lastResultCorrect ?: return
-        if (!correct && !state.mastered) {
+        // 测试模式答错不回队重答，仅置为未掌握
+        if (!isMasteredTest && !correct && !state.mastered) {
             wrongQueue.addLast(WrongReviewItem(current, WRONG_REVIEW_GAP + 1))
         }
 
@@ -131,16 +180,20 @@ class ReviewViewModel(
                     showAnswer = false,
                     lastResultCorrect = null,
                     finished = true,
-                    completedToday = true,
+                    completedToday = !isMasteredTest,
                     remainingCount = 0,
                     wrongCount = 0
                 )
             }
-            viewModelScope.launch {
-                repository.markSubjectCompleted(subjectId)
-                val records = repository.getSubjectCurrentMonthDailyRecordsOnce(subjectId)
-                _uiState.update { it.copy(dailyRecords = records) }
-                refreshCanAnotherGroup()
+            if (isMasteredTest) {
+                if (masteredTestTotal > 0) _masteredTestProgress.value = 1f
+            } else {
+                viewModelScope.launch {
+                    repository.markSubjectCompleted(subjectId)
+                    val records = repository.getSubjectCurrentMonthDailyRecordsOnce(subjectId)
+                    _uiState.update { it.copy(dailyRecords = records) }
+                    refreshCanAnotherGroup()
+                }
             }
         } else {
             _uiState.update {
@@ -202,7 +255,7 @@ class ReviewViewModel(
                         state.copy(
                             currentQuestion = null,
                             finished = true,
-                            completedToday = true
+                            completedToday = !isMasteredTest
                         )
                     } else {
                         state.copy(
@@ -249,6 +302,10 @@ class ReviewViewModel(
     }
 
     private fun loadQueue() {
+        if (isMasteredTest) {
+            loadMasteredTestQueue()
+            return
+        }
         viewModelScope.launch {
             val alreadyCompleted = repository.isSubjectCompletedToday(subjectId)
             val dailyRecords = repository.getSubjectCurrentMonthDailyRecordsOnce(subjectId)
@@ -312,6 +369,36 @@ class ReviewViewModel(
         }
     }
 
+    /** 已掌握题目测试：取全部已掌握题目并随机打乱，不涉及任何每日数据。 */
+    private fun loadMasteredTestQueue() {
+        viewModelScope.launch {
+            normalQueue.clear()
+            wrongQueue.clear()
+            completedInSession.clear()
+
+            val mastered = repository.getMasteredQuestionsOnce(subjectId).shuffled()
+            masteredTestTotal = mastered.size
+            masteredTestAnswered = 0
+            _masteredTestProgress.value = 0f
+
+            normalQueue.addAll(mastered)
+            val first = nextQuestion()
+
+            _uiState.value = ReviewUiState(
+                isLoading = false,
+                currentQuestion = first,
+                finished = first == null,
+                mastered = first?.question?.mastered ?: false,
+                completedToday = false,
+                remainingCount = normalQueue.size + wrongQueue.size,
+                wrongCount = 0,
+                unmasteredCount = 0,
+                testTotal = mastered.size
+            )
+            questionStartTime = System.currentTimeMillis()
+        }
+    }
+
     private fun nextQuestion(): QuestionDetail? {
         return if (normalQueue.isNotEmpty()) {
             normalQueue.removeFirst()
@@ -339,6 +426,30 @@ class ReviewViewModel(
         val state = _uiState.value
         val question = state.currentQuestion ?: return
         val responseTime = (System.currentTimeMillis() - questionStartTime).coerceAtLeast(0L)
+
+        if (isMasteredTest) {
+            viewModelScope.launch {
+                // 不写日志/不更新调度/不计入每日统计；答错仅置为未掌握
+                if (!isCorrect) {
+                    repository.toggleMastered(question.question.id, false)
+                }
+                masteredTestAnswered++
+                _masteredTestProgress.value = if (masteredTestTotal <= 0) {
+                    0f
+                } else {
+                    (masteredTestAnswered.toFloat() / masteredTestTotal).coerceIn(0f, 1f)
+                }
+                _uiState.update {
+                    it.copy(
+                        answered = true,
+                        lastResultCorrect = isCorrect,
+                        mastered = if (isCorrect) question.question.mastered else false,
+                        unmasteredCount = it.unmasteredCount + if (isCorrect) 0 else 1
+                    )
+                }
+            }
+            return
+        }
 
         viewModelScope.launch {
             withContext(NonCancellable) {

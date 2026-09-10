@@ -15,6 +15,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
@@ -27,12 +28,16 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -52,6 +57,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.colorResource
+import androidx.compose.ui.res.dimensionResource
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -63,6 +69,7 @@ import com.hamster.review.Main
 import com.hamster.review.compose.InquiryDialog
 import com.hamster.review.compose.ItemGroup
 import com.hamster.review.compose.PageColumn
+import com.hamster.review.compose.SharedTiltState
 import com.hamster.review.compose.rememberSharedTiltState
 import com.hamster.review.data.db.QuestionDetail
 import com.hamster.review.data.db.QuestionOptionEntity
@@ -85,16 +92,29 @@ import kotlin.math.ceil
 @Composable
 fun ReviewScreen(
     onNavigate: (com.hamster.review.Route) -> Unit,
-    setTopbarTitle: (String) -> Unit
+    setTopbarTitle: (String) -> Unit,
+    setReviewProgress: (Float?) -> Unit
 ) {
     val viewModel: ReviewViewModel = viewModel()
     val state by viewModel.uiState.collectAsState()
+    val todayProgress by viewModel.todayProgress.collectAsState()
     val sharedTiltState = rememberSharedTiltState()
     var cardSize by remember { mutableStateOf(IntSize.Zero) }
     val offsetX = remember { Animatable(0f) }
     val offsetY = remember { Animatable(0f) }
     val cardAlpha = remember { Animatable(1f) }
     val coroutineScope = rememberCoroutineScope()
+
+    // 只要停留在 Review 页就显示顶栏环形进度；离开时清除
+    LaunchedEffect(todayProgress) {
+        setReviewProgress(todayProgress)
+    }
+    LaunchedEffect(Unit) {
+        if (viewModel.isMasteredTest) setTopbarTitle("已掌握测试")
+    }
+    DisposableEffect(Unit) {
+        onDispose { setReviewProgress(null) }
+    }
 
     fun animateExitAndNext(correct: Boolean) {
         coroutineScope.launch {
@@ -135,10 +155,23 @@ fun ReviewScreen(
                 ItemGroup(titleState = sharedTiltState) {
                     Text(
                         modifier = Modifier.padding(24.dp),
-                        text = "已完成当日学习",
+                        text = when {
+                            viewModel.isMasteredTest && state.testTotal == 0 -> "没有已掌握的题目"
+                            viewModel.isMasteredTest -> "测试完成"
+                            else -> "已完成当日学习"
+                        },
                         fontSize = 24.sp,
                         fontWeight = FontWeight.Bold
                     )
+
+                    if (viewModel.isMasteredTest && state.testTotal > 0) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "本次答错 ${state.unmasteredCount} 题，已置为未掌握",
+                            modifier = Modifier.padding(horizontal = 24.dp),
+                            fontSize = 14.sp
+                        )
+                    }
 
                     Spacer(modifier = Modifier.height(24.dp))
 
@@ -165,21 +198,6 @@ fun ReviewScreen(
                         }
                     }
                 }
-//                Column(modifier = Modifier.fillMaxSize()) {
-//                    Box(
-//                        modifier = Modifier
-//                            .weight(1f)
-//                            .fillMaxWidth()
-//                            .onSizeChanged { cardSize = it }
-//                            .graphicsLayer {
-//                                translationX = offsetX.value
-//                                translationY = offsetY.value
-//                                alpha = cardAlpha.value
-//                            }
-//                    ) {
-//
-//                    }
-//                }
             }
 
             else -> {
@@ -198,18 +216,22 @@ fun ReviewScreen(
                                 alpha = cardAlpha.value
                             }
                     ) {
-                        QuestionCard(
-                            modifier = Modifier.fillMaxSize(),
-                            question = question,
-                            state = state,
-                            onSelectOption = viewModel::selectOption,
-                            onToggleMastered = viewModel::toggleMastered,
-                            onSaveEdited = viewModel::saveEditedQuestion,
-                            onDeleteQuestion = viewModel::deleteQuestion,
-                            isEditing = isEditing,
-                            onEditingChange = { isEditing = it },
-                        )
+                        Column(modifier = Modifier.fillMaxSize()) {
+                            ReviewQuestionSection(
+                                titleState = sharedTiltState,
+                                question = question,
+                                state = state,
+                                onSelectOption = viewModel::selectOption,
+                                onToggleMastered = viewModel::toggleMastered,
+                                onSaveEdited = viewModel::saveEditedQuestion,
+                                onDeleteQuestion = viewModel::deleteQuestion,
+                                isEditing = isEditing,
+                                onEditingChange = { isEditing = it },
+                            )
+                        }
                     }
+
+                    Spacer(modifier = Modifier.height(dimensionResource(R.dimen.item_group_gap)))
 
                     ActionButtons(
                         question = question,
@@ -235,8 +257,8 @@ fun ReviewScreen(
 }
 
 @Composable
-private fun QuestionCard(
-    modifier: Modifier = Modifier,
+private fun ColumnScope.ReviewQuestionSection(
+    titleState: SharedTiltState,
     question: QuestionDetail,
     state: ReviewUiState,
     onSelectOption: (Long) -> Unit,
@@ -246,35 +268,37 @@ private fun QuestionCard(
     isEditing: Boolean,
     onEditingChange: (Boolean) -> Unit
 ) {
+    val questionTypeName = when (question.question.type) {
+        QuestionType.SINGLE_CHOICE -> "单选题"
+        QuestionType.TRUE_FALSE -> "判断题"
+        QuestionType.FILL_BLANK -> "填空题"
+        QuestionType.MULTIPLE_CHOICE -> "多选题"
+    }
+
+    var showSaveDialog by remember { mutableStateOf(false) }
+    var showDeleteDialog by remember { mutableStateOf(false) }
+    var editContent by remember(question.question.id) { mutableStateOf(question.question.content) }
+    var editAnswer by remember(question.question.id) { mutableStateOf(question.question.answer ?: "") }
+    var editExplanation by remember(question.question.id) { mutableStateOf(question.question.explanation) }
+    var editOptions by remember(question.question.id) {
+        mutableStateOf(question.options.map { Triple(it.id, it.content, it.isCorrect) })
+    }
+    var editingField by remember { mutableStateOf<String?>(null) }
+    var editingOptionId by remember { mutableStateOf<Long?>(null) }
+
+    BackHandler(enabled = isEditing) {
+        onEditingChange(false)
+    }
+
+    // 顶部单独卡片：题型 / 答题结果 + 功能按钮
     ItemGroup(
-        modifier = modifier,
-        contentModifier = Modifier.padding(16.dp),
-        titleState = rememberSharedTiltState()
+        titleState = titleState,
+        contentModifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
     ) {
-        val questionTypeName = when (question.question.type) {
-            QuestionType.SINGLE_CHOICE -> "单选题"
-            QuestionType.TRUE_FALSE -> "判断题"
-            QuestionType.FILL_BLANK -> "填空题"
-            QuestionType.MULTIPLE_CHOICE -> "多选题"
-        }
-
-        var showSaveDialog by remember { mutableStateOf(false) }
-        var showDeleteDialog by remember { mutableStateOf(false) }
-        var editContent by remember(question.question.id) { mutableStateOf(question.question.content) }
-        var editAnswer by remember(question.question.id) { mutableStateOf(question.question.answer ?: "") }
-        var editExplanation by remember(question.question.id) { mutableStateOf(question.question.explanation) }
-        var editOptions by remember(question.question.id) {
-            mutableStateOf(question.options.map { Triple(it.id, it.content, it.isCorrect) })
-        }
-        var editingField by remember { mutableStateOf<String?>(null) }
-        var editingOptionId by remember { mutableStateOf<Long?>(null) }
-
-        BackHandler(enabled = isEditing) {
-            onEditingChange(false)
-        }
-
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(56.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -291,8 +315,7 @@ private fun QuestionCard(
                         colorResource(R.color.red)
                 } else Color.Black,
                 fontSize = 18.sp,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(top = 12.dp)
+                fontWeight = FontWeight.Bold
             )
 
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -323,55 +346,21 @@ private fun QuestionCard(
                 }
             }
         }
+    }
 
-        if (showSaveDialog) {
-            InquiryDialog(
-                title = "保存修改",
-                content = "是否保存对题目的修改？",
-                confirmText = "保存",
-                onDismissRequest = {
-                    showSaveDialog = false
-                    onEditingChange(false)
-                },
-                onCancel = {
-                    showSaveDialog = false
-                    onEditingChange(false)
-                },
-                onConfirm = {
-                    onSaveEdited(
-                        question.question.id,
-                        editContent,
-                        if (question.question.type == QuestionType.FILL_BLANK) editAnswer else question.question.answer,
-                        editExplanation,
-                        editOptions
-                    )
-                    showSaveDialog = false
-                    onEditingChange(false)
-                    true
-                }
-            )
-        }
+    Spacer(modifier = Modifier.height(dimensionResource(R.dimen.item_group_gap)))
 
-        if (showDeleteDialog) {
-            InquiryDialog(
-                title = "删除题目",
-                content = "确定删除该题目吗？",
-                confirmText = "删除",
-                confirmColor = colorResource(R.color.red),
-                onDismissRequest = { showDeleteDialog = false },
-                onCancel = { showDeleteDialog = false },
-                onConfirm = {
-                    onDeleteQuestion(question.question.id)
-                    showDeleteDialog = false
-                    onEditingChange(false)
-                    true
-                }
-            )
-        }
-
+    // 题目卡片：占满剩余空间。题面固定最上方(过长可滚动)，备注/选项/答案固定在最下方
+    ItemGroup(
+        titleState = titleState,
+        modifier = Modifier.weight(1f),
+        contentModifier = Modifier
+            .fillMaxHeight()
+            .padding(16.dp)
+    ) {
         Column(
             modifier = Modifier
-                .fillMaxWidth()
+                .fillMaxSize()
                 .clickable(
                     indication = null,
                     interactionSource = remember { MutableInteractionSource() }
@@ -381,160 +370,219 @@ private fun QuestionCard(
                 }
         ) {
 
-            if (isEditing && editingField == "content") {
-                BasicTextField(
-                    value = editContent,
-                    onValueChange = { editContent = it },
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
-                )
-            } else {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .then(if (isEditing) Modifier.clickable { editingField = "content" } else Modifier)
-                ) {
-                    MarkdownContent(if (isEditing) editContent else question.question.content, fontSize = 20.sp)
-                }
-            }
-
-            Spacer(modifier = Modifier.height(6.dp))
-
-            when (question.question.type) {
-                QuestionType.SINGLE_CHOICE,
-                QuestionType.MULTIPLE_CHOICE,
-                QuestionType.TRUE_FALSE -> {
-                    val fixedOrder = question.question.type == QuestionType.TRUE_FALSE
-                    val displayOptions = remember(question.question.id, fixedOrder) {
-                        if (fixedOrder) {
-                            question.options.sortedBy { it.sortOrder }
-                        } else {
-                            question.options.shuffled()
-                        }
-                    }
-                    val options = if (isEditing) {
-                        displayOptions.map { option ->
-                            val edit = editOptions.first { it.first == option.id }
-                            QuestionOptionEntity(
-                                questionId = question.question.id,
-                                id = edit.first,
-                                content = edit.second,
-                                isCorrect = edit.third,
-                                sortOrder = option.sortOrder
-                            )
-                        }
-                    } else {
-                        displayOptions
-                    }
-                    options.forEachIndexed { index, option ->
-                        if (isEditing) {
-                            OptionItem(
-                                option = option,
-                                background = if (option.isCorrect) {
-                                    colorResource(R.color.mikuGreen).copy(alpha = 0.8f)
-                                } else {
-                                    Color.Transparent
-                                },
-                                enabled = true,
-                                onClick = {
-                                    editingOptionId = null
-                                    val newList = editOptions.toMutableList()
-                                    if (question.question.type == QuestionType.MULTIPLE_CHOICE) {
-                                        newList[index] = newList[index].copy(third = !newList[index].third)
-                                    } else {
-                                        newList.indices.forEach { i ->
-                                            newList[i] = newList[i].copy(third = i == index)
-                                        }
-                                    }
-                                    editOptions = newList
-                                },
-                                onDoubleTap = {
-                                    if (question.question.type != QuestionType.TRUE_FALSE) {
-                                        editingOptionId = option.id
-                                    }
-                                },
-                                editingText = if (editingOptionId == option.id) editOptions[index].second else null,
-                                onTextChange = if (editingOptionId == option.id) { newText ->
-                                    editOptions = editOptions.toMutableList().also { list ->
-                                        list[index] = list[index].copy(second = newText)
-                                    }
-                                } else null
-                            )
-                        } else {
-                            OptionItem(
-                                option = option,
-                                background = optionBackground(question, state, option),
-                                enabled = !state.answered,
-                                onClick = { onSelectOption(option.id) }
-                            )
-                        }
-
-                        Spacer(modifier = Modifier.height(2.dp))
-                    }
-                }
-
-                QuestionType.FILL_BLANK -> {
-                    if (state.showAnswer || isEditing) {
-                        if (isEditing && editingField == "answer") {
-                            BasicTextField(
-                                value = editAnswer,
-                                onValueChange = { editAnswer = it },
-                                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
-                            )
-                        } else {
-                            Text(
-                                text = if (isEditing) "答案：\n$editAnswer" else "答案：\n${question.question.answer.orEmpty()}",
-                                fontSize = 18.sp,
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier
-                                    .padding(vertical = 12.dp)
-                                    .then(if (isEditing) Modifier.clickable { editingField = "answer" } else Modifier)
-                            )
-                        }
-                    }
-                }
-            }
-
-            if (state.answered || isEditing) {
-                if (isEditing && editingField == "explanation") {
+            // 题面
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
+            ) {
+                if (isEditing && editingField == "content") {
                     BasicTextField(
-                        value = editExplanation,
-                        onValueChange = { editExplanation = it },
-                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+                        value = editContent,
+                        onValueChange = { editContent = it },
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
                     )
                 } else {
-                    Text(
-                        text = if (isEditing) "备注：$editExplanation" else "备注：${question.question.explanation}",
-                        fontSize = 14.sp,
+                    Box(
                         modifier = Modifier
-                            .padding(top = 8.dp)
-                            .then(if (isEditing) Modifier.clickable { editingField = "explanation" } else Modifier)
-                    )
+                            .fillMaxWidth()
+                            .then(if (isEditing) Modifier.clickable { editingField = "content" } else Modifier)
+                    ) {
+                        MarkdownContent(
+                            modifier = Modifier.padding(8.dp),
+                            content = if (isEditing) editContent else question.question.content,
+                            fontSize = 20.sp
+                        )
+                    }
+                }
+
+                if (question.question.type == QuestionType.FILL_BLANK && (state.showAnswer || isEditing)) {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    if (isEditing && editingField == "answer") {
+                        BasicTextField(
+                            value = editAnswer,
+                            onValueChange = { editAnswer = it },
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+                        )
+                    } else {
+                        Text(
+                            text = if (isEditing) "答案：\n$editAnswer" else "答案：\n${question.question.answer.orEmpty()}",
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier
+                                .padding(vertical = 4.dp)
+                                .then(if (isEditing) Modifier.clickable { editingField = "answer" } else Modifier)
+                        )
+                    }
                 }
             }
 
-            if (isEditing) {
-                Spacer(modifier = Modifier.height(12.dp))
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable(
-                            interactionSource = remember { MutableInteractionSource() },
-                            indication = null,
-                            onClick = { showDeleteDialog = true }
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Spacer(modifier = Modifier.height(8.dp))
+
+                if (state.answered || isEditing) {
+                    if (isEditing && editingField == "explanation") {
+                        BasicTextField(
+                            value = editExplanation,
+                            onValueChange = { editExplanation = it },
+                            modifier = Modifier.fillMaxWidth()
                         )
-                        .padding(vertical = 8.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        painter = painterResource(R.drawable.delete_line),
-                        contentDescription = null,
-                        tint = colorResource(R.color.red),
-                        modifier = Modifier.size(20.dp)
-                    )
+                    } else {
+                        Text(
+                            text = if (isEditing) "备注：$editExplanation" else "备注：${question.question.explanation}",
+                            fontSize = 14.sp,
+                            modifier = Modifier
+                                .then(if (isEditing) Modifier.clickable { editingField = "explanation" } else Modifier)
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                }
+
+                when (question.question.type) {
+                    QuestionType.SINGLE_CHOICE,
+                    QuestionType.MULTIPLE_CHOICE,
+                    QuestionType.TRUE_FALSE -> {
+                        val fixedOrder = question.question.type == QuestionType.TRUE_FALSE
+                        val displayOptions = remember(question.question.id, fixedOrder) {
+                            if (fixedOrder) {
+                                question.options.sortedBy { it.sortOrder }
+                            } else {
+                                question.options.shuffled()
+                            }
+                        }
+                        val options = if (isEditing) {
+                            displayOptions.map { option ->
+                                val edit = editOptions.first { it.first == option.id }
+                                QuestionOptionEntity(
+                                    questionId = question.question.id,
+                                    id = edit.first,
+                                    content = edit.second,
+                                    isCorrect = edit.third,
+                                    sortOrder = option.sortOrder
+                                )
+                            }
+                        } else {
+                            displayOptions
+                        }
+                        options.forEachIndexed { index, option ->
+                            if (isEditing) {
+                                OptionItem(
+                                    option = option,
+                                    background = if (option.isCorrect) {
+                                        colorResource(R.color.mikuGreen).copy(alpha = 0.8f)
+                                    } else {
+                                        Color.Transparent
+                                    },
+                                    enabled = true,
+                                    onClick = {
+                                        editingOptionId = null
+                                        val newList = editOptions.toMutableList()
+                                        if (question.question.type == QuestionType.MULTIPLE_CHOICE) {
+                                            newList[index] = newList[index].copy(third = !newList[index].third)
+                                        } else {
+                                            newList.indices.forEach { i ->
+                                                newList[i] = newList[i].copy(third = i == index)
+                                            }
+                                        }
+                                        editOptions = newList
+                                    },
+                                    onDoubleTap = {
+                                        if (question.question.type != QuestionType.TRUE_FALSE) {
+                                            editingOptionId = option.id
+                                        }
+                                    },
+                                    editingText = if (editingOptionId == option.id) editOptions[index].second else null,
+                                    onTextChange = if (editingOptionId == option.id) { newText ->
+                                        editOptions = editOptions.toMutableList().also { list ->
+                                            list[index] = list[index].copy(second = newText)
+                                        }
+                                    } else null
+                                )
+                            } else {
+                                OptionItem(
+                                    option = option,
+                                    background = optionBackground(question, state, option),
+                                    enabled = !state.answered,
+                                    onClick = { onSelectOption(option.id) }
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.height(2.dp))
+                        }
+                    }
+
+                    QuestionType.FILL_BLANK -> Unit
+                }
+
+                if (isEditing) {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null,
+                                onClick = { showDeleteDialog = true }
+                            )
+                            .padding(vertical = 8.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            painter = painterResource(R.drawable.delete_line),
+                            contentDescription = null,
+                            tint = colorResource(R.color.red),
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
                 }
             }
         }
+    }
 
+    if (showSaveDialog) {
+        InquiryDialog(
+            title = "保存修改",
+            content = "是否保存对题目的修改？",
+            confirmText = "保存",
+            onDismissRequest = {
+                showSaveDialog = false
+                onEditingChange(false)
+            },
+            onCancel = {
+                showSaveDialog = false
+                onEditingChange(false)
+            },
+            onConfirm = {
+                onSaveEdited(
+                    question.question.id,
+                    editContent,
+                    if (question.question.type == QuestionType.FILL_BLANK) editAnswer else question.question.answer,
+                    editExplanation,
+                    editOptions
+                )
+                showSaveDialog = false
+                onEditingChange(false)
+                true
+            }
+        )
+    }
+
+    if (showDeleteDialog) {
+        InquiryDialog(
+            title = "删除题目",
+            content = "确定删除该题目吗？",
+            confirmText = "删除",
+            confirmColor = colorResource(R.color.red),
+            onDismissRequest = { showDeleteDialog = false },
+            onCancel = { showDeleteDialog = false },
+            onConfirm = {
+                onDeleteQuestion(question.question.id)
+                showDeleteDialog = false
+                onEditingChange(false)
+                true
+            }
+        )
     }
 }
 
@@ -611,7 +659,7 @@ private fun ActionButtons(
                         colors = ButtonDefaults.textButtonColors(colorResource(R.color.btn_confirm)),
                         onClick = { onSelfAssess(true) }
                     ) {
-                        Text("下一个", color = Color.Black)
+                        Text("确认", color = Color.Black)
                     }
                 }
             }
@@ -723,9 +771,9 @@ private fun optionBackground(
 
 
 @Composable
-private fun MarkdownContent(content: String, fontSize: TextUnit = 12.sp) {
+private fun MarkdownContent(modifier: Modifier = Modifier, content: String, fontSize: TextUnit = 12.sp) {
     Markdown(
-        modifier = Modifier.padding(vertical = 4.dp),
+        modifier = modifier,
         content = content,
         components = markdownComponents(
             codeFence = { model ->
