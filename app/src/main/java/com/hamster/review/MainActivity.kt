@@ -159,6 +159,10 @@ class MainActivity : FragmentActivity() {
                                               onAddSubject = mainViewModel::addSubject,
                                               onDeleteSubject = mainViewModel::deleteSubject,
                                               onUpdateOfficialBank = mainViewModel::updateOfficialBank,
+                                              homeExpanded = mainViewModel.homeExpanded,
+                                              onHomeExpandedChange = mainViewModel::setHomeExpanded,
+                                              homeTopSubjectId = mainViewModel.homeTopSubjectId,
+                                              onHomeTopSubjectIdChange = mainViewModel::setHomeTopSubjectId,
 
                                             setTopbarTitle = {
                                                 mainViewModel.topbarTitle = it

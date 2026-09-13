@@ -87,4 +87,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun setReviewProgress(value: Float?) {
         _reviewProgress = value
     }
+
+    /** 首页科目卡片是否展开为列表（会话内保持）。 */
+    private var _homeExpanded by mutableStateOf(false)
+    val homeExpanded: Boolean
+        get() = _homeExpanded
+
+    fun setHomeExpanded(expanded: Boolean) {
+        _homeExpanded = expanded
+    }
+
+    /** 首页堆叠模式下当前顶层科目 id（会话内保持）。 */
+    private var _homeTopSubjectId by mutableStateOf<Long?>(null)
+    val homeTopSubjectId: Long?
+        get() = _homeTopSubjectId
+
+    fun setHomeTopSubjectId(id: Long?) {
+        _homeTopSubjectId = id
+    }
 }
