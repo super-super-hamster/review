@@ -28,6 +28,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -54,8 +55,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.hamster.review.Main
 import com.hamster.review.R
+import com.hamster.review.compose.InquiryDialog
 import com.hamster.review.compose.ItemGroup
 import com.hamster.review.compose.PageColumn
 import com.hamster.review.compose.outlinedTextFieldColors
@@ -67,10 +68,13 @@ import com.hamster.review.viewModel.AddQuestionViewModel
 @Composable
 fun AddQuestionScreen(
     setTopbarTitle: (String) -> Unit,
-    onNavigate: (com.hamster.review.Route) -> Unit
+    onBack: () -> Unit
 ) {
     val viewModel: AddQuestionViewModel = viewModel()
     val type = viewModel.type
+    val isEdit = viewModel.isEdit
+    val seed by viewModel.seed.collectAsState()
+    val loading by viewModel.loading.collectAsState()
     val isChoice = type == QuestionType.SINGLE_CHOICE || type == QuestionType.MULTIPLE_CHOICE
     val isJudge = type == QuestionType.TRUE_FALSE
     val isFill = type == QuestionType.FILL_BLANK
@@ -83,12 +87,10 @@ fun AddQuestionScreen(
         QuestionType.TRUE_FALSE -> "判断题"
         QuestionType.FILL_BLANK -> "填空题"
     }
-    setTopbarTitle("新增题目")
+    setTopbarTitle(if (isEdit) "编辑题目" else "新增题目")
 
-    BackHandler { onNavigate(Main) }
-
-    var content by remember { mutableStateOf("") }
-    var answer by remember { mutableStateOf("") }
+    var content by remember(seed?.id) { mutableStateOf(seed?.content ?: "") }
+    var answer by remember(seed?.id) { mutableStateOf(seed?.answer ?: "") }
 
     val defaultOptions = when (type) {
         QuestionType.SINGLE_CHOICE -> listOf("选项 1", "选项 2")
@@ -96,10 +98,20 @@ fun AddQuestionScreen(
         QuestionType.TRUE_FALSE -> listOf("对", "错")
         else -> emptyList()
     }
-    var options by remember { mutableStateOf(defaultOptions) }
-    var singleCorrect by remember { mutableStateOf<Int?>(null) } // 单选/判断
-    var multiCorrect by remember { mutableStateOf<Set<Int>>(emptySet()) } // 多选
+    var options by remember(seed?.id) { mutableStateOf(seed?.optionTexts ?: defaultOptions) }
+    var singleCorrect by remember(seed?.id) {
+        mutableStateOf(seed?.optionCorrect?.indexOfFirst { it }?.takeIf { it >= 0 })
+    } // 单选/判断
+    var multiCorrect by remember(seed?.id) {
+        mutableStateOf(
+            seed?.optionCorrect
+                ?.mapIndexedNotNull { index, correct -> if (correct) index else null }
+                ?.toSet()
+                ?: emptySet()
+        )
+    } // 多选
     var editingIndex by remember { mutableStateOf<Int?>(null) }
+    var showExitDialog by remember { mutableStateOf(false) }
 
     val focusManager = LocalFocusManager.current
     val keyboardController = LocalSoftwareKeyboardController.current
@@ -130,7 +142,8 @@ fun AddQuestionScreen(
         editingIndex = null
         val minSize = if (type == QuestionType.MULTIPLE_CHOICE) 3 else 2
         val rowBlank = options[index].isBlank()
-        if (!isJudge && rowBlank && options.size > minSize) {
+        // 编辑模式下不允许增删选项（保持与已存选项一一对应）
+        if (!isEdit && !isJudge && rowBlank && options.size > minSize) {
             removeOption(index)
             return
         }
@@ -159,27 +172,81 @@ fun AddQuestionScreen(
             content.isNotBlank() && multiCorrect.size >= 2 && options.all { it.isNotBlank() }
     }
 
-    fun save() {
-        val optionPairs = if (isFill) {
-            emptyList()
-        } else {
-            options.mapIndexed { index, text ->
-                val correct = if (type == QuestionType.MULTIPLE_CHOICE) {
-                    index in multiCorrect
-                } else {
-                    singleCorrect == index
-                }
-                text to correct
+    fun buildOptionPairs(): List<Pair<String, Boolean>> = if (isFill) {
+        emptyList()
+    } else {
+        options.mapIndexed { index, text ->
+            val correct = if (type == QuestionType.MULTIPLE_CHOICE) {
+                index in multiCorrect
+            } else {
+                singleCorrect == index
             }
+            text to correct
         }
-        viewModel.saveQuestion(content, answer, optionPairs) { id ->
+    }
+
+    /** 编辑模式下判断是否有改动。 */
+    fun isDirty(): Boolean {
+        val origin = seed ?: return false
+        if (content.trim() != origin.content.trim()) return true
+        if (isFill) return answer.trim() != origin.answer.trim()
+        val pairs = buildOptionPairs()
+        if (pairs.size != origin.optionTexts.size) return true
+        return pairs.indices.any { i ->
+            pairs[i].first.trim() != origin.optionTexts[i].trim() ||
+                pairs[i].second != origin.optionCorrect[i]
+        }
+    }
+
+    fun save() {
+        viewModel.saveQuestion(content, answer, buildOptionPairs()) { ok ->
             Toast.makeText(
                 context,
-                if (id > 0) "题目已保存" else "保存失败，请重试",
+                if (ok) "题目已保存" else "保存失败，请重试",
                 Toast.LENGTH_SHORT
             ).show()
-            onNavigate(Main)
+            if (ok) onBack()
         }
+    }
+
+    // 返回：编辑模式且有改动时先询问是否保存
+    fun attemptExit() {
+        if (isEdit && isDirty()) {
+            showExitDialog = true
+        } else {
+            onBack()
+        }
+    }
+
+    BackHandler { attemptExit() }
+
+    if (showExitDialog) {
+        InquiryDialog(
+            title = "保存修改",
+            content = "是否保存对题目的修改？",
+            confirmText = "保存",
+            cancelText = "放弃",
+            onDismissRequest = { showExitDialog = false }, // 点击外部：留在页面
+            onCancel = {
+                showExitDialog = false
+                onBack() // 放弃修改并退出
+            },
+            onConfirm = {
+                save() // 保存成功后自动退出
+                true
+            }
+        )
+    }
+
+    if (loading) {
+        PageColumn(sharedTiltState = sharedTiltState) {
+            Text(
+                modifier = Modifier.padding(24.dp),
+                text = "加载中...",
+                fontSize = 18.sp
+            )
+        }
+        return
     }
 
     PageColumn(sharedTiltState = sharedTiltState) {
@@ -253,7 +320,7 @@ fun AddQuestionScreen(
                                 correct = correct,
                                 editable = !isJudge,
                                 editing = editing,
-                                deletable = options.size > minOptionSize,
+                                deletable = !isEdit && options.size > minOptionSize,
                                 onClick = { onRowClick(index) },
                                 onDoubleTap = { editingIndex = index },
                                 onTextChange = { updateOptionText(index, it) },
@@ -263,7 +330,7 @@ fun AddQuestionScreen(
                             Spacer(modifier = Modifier.height(6.dp))
                         }
 
-                        if (isChoice && options.size < 5) {
+                        if (isChoice && !isEdit && options.size < 5) {
                             AddOptionRow(onClick = { addOption() })
                         }
                     }
@@ -284,7 +351,7 @@ fun AddQuestionScreen(
                         border = BorderStroke(1.dp, Color.LightGray),
                         shape = squircleShape,
                         colors = ButtonDefaults.textButtonColors(Color.Transparent),
-                        onClick = { onNavigate(Main) }
+                        onClick = { attemptExit() }
                     ) {
                         Text("取消", color = colorResource(R.color.text))
                     }

@@ -116,7 +116,7 @@ fun MainScreen(
     longPressSubject?.let { subject ->
         OptionDialog(
             title = subject.subject.name,
-            options = listOf("新增题目", "设置每日题目数量", "删除科目", "已掌握题目测试"),
+            options = listOf("新增题目", "设置每日题目数量", "删除科目", "已掌握题目测试", "管理题目"),
             initialSelections = setOf(0),
             singleSelect = true,
             onDismissRequest = { longPressSubject = null },
@@ -134,6 +134,9 @@ fun MainScreen(
                 }
                 if (3 in selected) {
                     onNavigate(com.hamster.review.Review(subject.subject.id, "mastered_test"))
+                }
+                if (4 in selected) {
+                    onNavigate(com.hamster.review.ManageQuestions(subject.subject.id))
                 }
                 longPressSubject = null
             }

@@ -464,6 +464,16 @@ class ReviewRepository(
         return questionDao.getMasteredQuestionDetails(subjectId)
     }
 
+    /** 取某科目全部题目（含选项/标签），用于"管理题目"列表，按 id 升序。 */
+    suspend fun getSubjectQuestionDetails(subjectId: Long): List<QuestionDetail> {
+        return questionDao.getSubjectQuestionDetails(subjectId)
+    }
+
+    /** 取单道题目（含选项/标签），用于编辑页初始化。 */
+    suspend fun getQuestionDetailOnce(questionId: Long): QuestionDetail? {
+        return questionDao.getQuestionDetail(questionId)
+    }
+
     suspend fun cleanupOldReviewLogs(keepDays: Int = 30) {
         val cutoff = System.currentTimeMillis() - keepDays * 24L * 60L * 60L * 1000L
         reviewLogDao.deleteOlderThan(cutoff)

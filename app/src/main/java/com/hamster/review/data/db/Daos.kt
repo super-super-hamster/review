@@ -144,6 +144,10 @@ interface QuestionDao {
     suspend fun getMasteredQuestionDetails(subjectId: Long): List<QuestionDetail>
 
     @Transaction
+    @Query("SELECT * FROM questions WHERE subjectId = :subjectId ORDER BY id ASC")
+    suspend fun getSubjectQuestionDetails(subjectId: Long): List<QuestionDetail>
+
+    @Transaction
     @Query("SELECT * FROM questions ORDER BY id ASC")
     suspend fun getAllQuestionDetails(): List<QuestionDetail>
 

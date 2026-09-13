@@ -56,6 +56,7 @@ import com.hamster.review.compose.slideInWithScaleEnter
 import com.hamster.review.compose.slideOutWithScalePopExit
 import com.hamster.review.screen.AddQuestionScreen
 import com.hamster.review.screen.MainScreen
+import com.hamster.review.screen.ManageQuestionsScreen
 import com.hamster.review.screen.ReviewScreen
 import com.hamster.review.viewModel.MainViewModel
 import com.kyant.backdrop.backdrops.layerBackdrop
@@ -200,9 +201,25 @@ class MainActivity : FragmentActivity() {
                                             setTopbarTitle = { title ->
                                                 mainViewModel.topbarTitle = title
                                             },
+                                            onBack = { navController.popBackStack() }
+                                        )
+                                    }
+
+                                    composable<ManageQuestions>(
+                                        enterTransition = { slideInWithScaleEnter() },
+                                        exitTransition = { scaleOutExit() },
+                                        popEnterTransition = { scaleInPopEnter() },
+                                        popExitTransition = { slideOutWithScalePopExit() }
+                                    ) {
+                                        ManageQuestionsScreen(
+                                            setTopbarTitle = { title ->
+                                                mainViewModel.topbarTitle = title
+                                            },
+                                            // 管理页 -> 编辑页需要压栈，返回时才能回到管理页
                                             onNavigate = { route ->
-                                                navController.simpleNavigate(route)
-                                            }
+                                                navController.navigate(route)
+                                            },
+                                            onBack = { navController.popBackStack() }
                                         )
                                     }
                                 }

@@ -16,5 +16,12 @@ data class Review(
 @Serializable
 data class AddQuestion(
     val subjectId: Long,
-    val typeName: String
+    val typeName: String,
+    /** > 0 表示编辑已有题目 */
+    val questionId: Long = 0L
+) : Route
+
+@Serializable
+data class ManageQuestions(
+    val subjectId: Long
 ) : Route
