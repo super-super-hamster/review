@@ -92,7 +92,7 @@ fun EditTextDialog(
 
     val density = LocalDensity.current
     val windowInfo = LocalWindowInfo.current
-    val screenHeight = with(density) { windowInfo.containerSize.width.toDp() }
+    val dialogMaxHeight = with(density) { (windowInfo.containerSize.height * 0.6f).toDp() }
 
     // 在组件加载时触发请求焦点
     LaunchedEffect(Unit) {
@@ -121,7 +121,7 @@ fun EditTextDialog(
 
     StandardDialog(
         onDismissRequest = cancelAction,
-        modifier = Modifier.heightIn(max = screenHeight * 0.6f) // 限制最大高度
+        modifier = Modifier.heightIn(max = dialogMaxHeight) // 限制最大高度
     ) {
         Column(
             modifier = Modifier
@@ -161,18 +161,20 @@ fun EditTextDialog(
                 value = tempText,
                 onValueChange = { input ->
                     val inputText = input.text
-                    val accepted = if (maxLength == -1 || inputText.length <= maxLength) {
+                    if (maxLength == -1 || inputText.length <= maxLength) {
                         when (type) {
-                            "Int" -> inputText.all { it.isDigit() }
-                            "Float" -> inputText.matches(Regex("^\\d*\\.?\\d*$"))
-                            else -> true
+                            "Int" -> {
+                                if (inputText.all { it.isDigit() }) {
+                                    tempText = input
+                                }
+                            }
+                            "Float" -> {
+                                if (inputText.matches(Regex("^\\d*\\.?\\d*$"))) {
+                                    tempText = input
+                                }
+                            }
+                            else -> tempText = input
                         }
-                    } else {
-                        false
-                    }
-                    if (accepted) {
-                        errorText = null
-                        tempText = input
                     }
                 },
                 placeholder = { Text(text = hint, color = Color.Gray) },
@@ -202,7 +204,7 @@ fun EditTextDialog(
                 colors = outlinedTextFieldColors()
             )
 
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(24.dp))
 
             Row(
                 modifier = Modifier

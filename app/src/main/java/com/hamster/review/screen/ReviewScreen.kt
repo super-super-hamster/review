@@ -416,12 +416,10 @@ private fun ColumnScope.ReviewQuestionSection(
                         )
                     }
                 }
-            }
 
-            Column(modifier = Modifier.fillMaxWidth()) {
-                Spacer(modifier = Modifier.height(8.dp))
-
+                // 备注（解析）：显示在题面下方
                 if (state.answered || isEditing) {
+                    Spacer(modifier = Modifier.height(8.dp))
                     if (isEditing && editingField == "explanation") {
                         BasicTextField(
                             value = editExplanation,
@@ -436,8 +434,11 @@ private fun ColumnScope.ReviewQuestionSection(
                                 .then(if (isEditing) Modifier.clickable { editingField = "explanation" } else Modifier)
                         )
                     }
-                    Spacer(modifier = Modifier.height(8.dp))
                 }
+            }
+
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Spacer(modifier = Modifier.height(8.dp))
 
                 when (question.question.type) {
                     QuestionType.SINGLE_CHOICE,
@@ -665,13 +666,20 @@ private fun ActionButtons(
             }
 
             else -> {
+                // 选择题/判断题：未选择任何选项时，按钮透明且不可点击
+                val hasSelection = state.selectedOptionIds.isNotEmpty()
                 Button(
                     modifier = Modifier
                         .height(buttonHeight)
                         .fillMaxWidth(),
+                    enabled = hasSelection,
                     border = BorderStroke(1.dp, Color.LightGray),
                     shape = squircleShape,
-                    colors = ButtonDefaults.textButtonColors(colorResource(R.color.btn_confirm)),
+                    colors = if (hasSelection) {
+                        ButtonDefaults.textButtonColors(colorResource(R.color.btn_confirm))
+                    } else {
+                        ButtonDefaults.textButtonColors(Color.Transparent)
+                    },
                     onClick = onSubmitChoice
                 ) {
                     Text("确认", color = Color.Black)
@@ -709,7 +717,7 @@ private fun OptionItem(
 
     Row(
         modifier = Modifier
-//            .height(48.dp)
+            .height(64.dp)
             .fillMaxWidth()
             .clip(shape = squircleShape)
             .background(background)
@@ -729,6 +737,7 @@ private fun OptionItem(
         }
     }
 }
+
 @Composable
 private fun optionBackground(
     question: QuestionDetail,
