@@ -434,22 +434,27 @@ fun OptionAnimItem(
     title: String,
     checked: Boolean,
     enabled: Boolean = true,
+    selectedColor: Color? = null,
     onCheckedChange: () -> Unit
 ) {
     val composition by rememberLottieComposition(LottieCompositionSpec.RawRes(R.raw.check_anim))
 
-    // 控制动画进度 (这里设定选中时进度为 1f，未选中时为 0f。如果您使用的动画满进度为 0.5f，请自行修改 targetValue)
+    // 控制动画进度
     val progress by animateFloatAsState(
         targetValue = if (checked) 1f else 0f,
-        animationSpec = tween(durationMillis = 300), // 动画时长500ms
+        animationSpec = tween(durationMillis = 500), // 动画时长500ms
         label = "LottieProgress"
     )
 
     val interactionSource = remember { MutableInteractionSource() }
 
+    val checkedBackground = selectedColor ?: colorResource(R.color.mikuGreen)
+
     Row(
         modifier = modifier
             .fillMaxWidth()
+            .clip(squircleShape)
+            .background(if (checked) checkedBackground else Color.Transparent)
             .clickable(
                 enabled = enabled,
                 interactionSource = interactionSource,

@@ -351,6 +351,7 @@ fun OptionDialog(
     options: List<String>,
     initialSelections: Set<Int> = emptySet(),
     singleSelect: Boolean = false,
+    optionSelectedColors: List<Color?> = emptyList(),
     onCancel: () -> Unit = {},
     onDismissRequest: () -> Unit,
     onConfirm: (Set<Int>) -> Unit,
@@ -394,6 +395,7 @@ fun OptionDialog(
                     OptionAnimItem(
                         title = optionTitle,
                         checked = isChecked,
+                        selectedColor = optionSelectedColors.getOrNull(index),
                         onCheckedChange = {
                             selectedItems = if (singleSelect) {
                                 setOf(index)
@@ -404,6 +406,8 @@ fun OptionDialog(
                             }
                         }
                     )
+
+                    Spacer(modifier = Modifier.height(3.dp))
                 }
             }
 

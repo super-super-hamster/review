@@ -116,9 +116,10 @@ fun MainScreen(
     longPressSubject?.let { subject ->
         OptionDialog(
             title = subject.subject.name,
-            options = listOf("新增题目", "设置每日题目数量", "删除科目", "已掌握题目测试", "管理题目"),
+            options = listOf("创建题目", "设置每日题目数量", "已掌握题目测试", "管理题目", "删除科目"),
             initialSelections = setOf(0),
             singleSelect = true,
+            optionSelectedColors = listOf(null, null, null, null, colorResource(R.color.red)),
             onDismissRequest = { longPressSubject = null },
             onCancel = { longPressSubject = null },
             onConfirm = { selected ->
@@ -130,13 +131,13 @@ fun MainScreen(
                     showLimitDialog = true
                 }
                 if (2 in selected) {
-                    deleteSubject = subject
-                }
-                if (3 in selected) {
                     onNavigate(com.hamster.review.Review(subject.subject.id, "mastered_test"))
                 }
-                if (4 in selected) {
+                if (3 in selected) {
                     onNavigate(com.hamster.review.ManageQuestions(subject.subject.id))
+                }
+                if (4 in selected) {
+                    deleteSubject = subject
                 }
                 longPressSubject = null
             }
@@ -218,7 +219,7 @@ fun MainScreen(
 
     if (showAddSubjectDialog) {
         EditTextDialog(
-            title = "新增科目",
+            title = "创建科目",
             initialValue = "",
             hint = "请输入科目名称",
             singleLine = true,
@@ -248,6 +249,24 @@ fun MainScreen(
                 .fillMaxWidth()
                 .verticalScroll(rememberScrollState())
         ) {
+            ItemGroup(titleState = sharedTiltState) {
+                ClickItem(
+                    title = "创建科目",
+                    icon = R.drawable.add_line
+                ) {
+                    showAddSubjectDialog = true
+                }
+
+                ClickItem(
+                    title = "更新题库",
+                    icon = R.drawable.update
+                ) {
+                    showBankUpdateDialog = true
+                }
+            }
+
+            Spacer(modifier = Modifier.height(dimensionResource(R.dimen.item_group_gap)))
+
             if (subjects.isNotEmpty()) {
                 SubjectStack(
                     ordered = orderedSubjects,
@@ -261,27 +280,6 @@ fun MainScreen(
                 )
 
                 Spacer(modifier = Modifier.height(dimensionResource(R.dimen.item_group_gap)))
-            }
-
-            ItemGroup(titleState = sharedTiltState) {
-                ClickItem(
-                    title = "新增科目",
-                    icon = R.drawable.add_line
-                ) {
-                    showAddSubjectDialog = true
-                }
-
-            }
-
-            Spacer(modifier = Modifier.height(dimensionResource(R.dimen.item_group_gap)))
-
-            ItemGroup(titleState = sharedTiltState) {
-                ClickItem(
-                    title = "更新题库",
-                    icon = R.drawable.update
-                ) {
-                    showBankUpdateDialog = true
-                }
             }
 
             if (showBankUpdateDialog) {
@@ -377,7 +375,6 @@ private val STACK_SLOTS = listOf(
 
 private val StackSpring = spring<Float>(dampingRatio = 0.85f, stiffness = 350f)
 
-/** 首页科目卡片：收起时堆叠（最多三层，两张只渲染两层），展开时按旋转顺序平铺为列表。 */
 @Composable
 private fun SubjectStack(
     ordered: List<SubjectWithTodayCount>,
@@ -399,7 +396,7 @@ private fun SubjectStack(
     val cardHeight = 128.dp
     val gap = dimensionResource(R.dimen.item_group_gap)
 
-    // 展开/收起进度（弹簧驱动，非线性）
+    // 展开/收起进度
     val expansion = remember { Animatable(if (expanded) 1f else 0f) }
     LaunchedEffect(expanded) {
         expansion.animateTo(
@@ -417,8 +414,6 @@ private fun SubjectStack(
         label = "stackHeight"
     )
 
-    // 顶层卡片位移：完全跟随手指（可正可负，无方向锁定、无阻尼）
-    // 左滑(负) = 下一张；右滑(正) = 上一张（上一张始终贴在左侧随手指一起右移）
     val dragX = remember { Animatable(0f) }
     val scope = rememberCoroutineScope()
     val incomingVisible = dragX.value > 0.5f
