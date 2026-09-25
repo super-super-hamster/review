@@ -4,19 +4,13 @@ import android.annotation.SuppressLint
 import android.os.Bundle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
-import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.LocalOverscrollFactory
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -26,7 +20,6 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -44,11 +37,6 @@ import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
-import com.airbnb.lottie.compose.LottieAnimation
-import com.airbnb.lottie.compose.LottieCompositionSpec
-import com.airbnb.lottie.compose.LottieConstants
-import com.airbnb.lottie.compose.animateLottieCompositionAsState
-import com.airbnb.lottie.compose.rememberLottieComposition
 import com.hamster.review.compose.RingProgress
 import com.hamster.review.compose.scaleInPopEnter
 import com.hamster.review.compose.scaleOutExit
@@ -66,9 +54,6 @@ import com.kyant.backdrop.effects.blur
 import com.kyant.backdrop.effects.lens
 import com.kyant.backdrop.effects.vibrancy
 import dev.chrisbanes.haze.HazeState
-import dev.chrisbanes.haze.HazeStyle
-import dev.chrisbanes.haze.HazeTint
-import dev.chrisbanes.haze.hazeEffect
 import dev.chrisbanes.haze.hazeSource
 import dev.chrisbanes.haze.materials.ExperimentalHazeMaterialsApi
 import kotlinx.coroutines.CoroutineScope
@@ -79,10 +64,6 @@ import kotlinx.coroutines.SupervisorJob
 class MainActivity : FragmentActivity() {
     // 跟随应用生命周期的协程作用域
     private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
-
-    private val requestAudioPermissionLauncher = registerForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { _: Boolean -> }
 
     private val mainViewModel: MainViewModel by viewModels()
 
@@ -114,27 +95,6 @@ class MainActivity : FragmentActivity() {
 
             var showTopBar by remember { mutableStateOf(true) }
 
-            var showLoading by remember { mutableStateOf(false) }
-            val loadingComposition by rememberLottieComposition(LottieCompositionSpec.RawRes(R.raw.loading_anim))
-            val loadingProgress by animateLottieCompositionAsState(
-                composition = loadingComposition,
-                iterations = LottieConstants.IterateForever
-            )
-            fun setLoading(isLoading: Boolean) {
-                showLoading = isLoading
-            }
-
-            val blurRadius by animateDpAsState(
-                targetValue = if (showLoading) 8.dp else 0.dp,
-                animationSpec = tween(100),
-                label = "blur"
-            )
-
-            // 更新期间显示加载层
-            LaunchedEffect(mainViewModel.bankUpdateBusy) {
-                setLoading(mainViewModel.bankUpdateBusy)
-            }
-
             MaterialTheme {
                 CompositionLocalProvider( LocalOverscrollFactory provides null) { // 禁用边缘回弹和光晕效果
                     Surface(modifier = Modifier.fillMaxSize(), color = colorResource(R.color.background)) { // 覆盖原有的主题色背景
@@ -155,6 +115,7 @@ class MainActivity : FragmentActivity() {
                                         popExitTransition = { slideOutWithScalePopExit() }
                                     ) {
                                         MainScreen(
+                                            mainViewModel = mainViewModel,
                                               subjects = subjects,
                                               onSetDailyLimit = mainViewModel::setSubjectDailyLimit,
                                               onAddSubject = mainViewModel::addSubject,
@@ -224,22 +185,6 @@ class MainActivity : FragmentActivity() {
                                     }
                                 }
 
-                                // 高斯模糊层
-                                if (blurRadius > 0.dp) {
-                                    Box(
-                                        modifier = Modifier
-                                            .fillMaxSize()
-                                            .hazeEffect(
-                                                state = hazeState,
-                                                style = HazeStyle(
-                                                    blurRadius = blurRadius,
-                                                    tint = HazeTint(Color.Transparent),
-                                                    noiseFactor = 0f
-                                                )
-                                            )
-                                    )
-                                }
-
                                 // 显示顶部标题栏
                                 if (showTopBar) {
                                     CenterAlignedTopAppBar(
@@ -277,26 +222,6 @@ class MainActivity : FragmentActivity() {
                                     )
                                 }
 
-                                // 显示加载
-                                if (showLoading) {
-                                    Box(
-                                        modifier = Modifier
-                                            .fillMaxSize()
-                                            .clickable(
-                                                interactionSource = remember { MutableInteractionSource() },
-                                                indication = null
-                                            ) {
-//                                                showLoading = false
-                                            },
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        LottieAnimation(
-                                            composition = loadingComposition,
-                                            progress = { loadingProgress },
-                                            modifier = Modifier.size(196.dp)
-                                        )
-                                    }
-                                }
                             }
                         }
                     }

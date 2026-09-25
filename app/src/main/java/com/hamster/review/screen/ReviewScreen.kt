@@ -183,6 +183,7 @@ fun ReviewScreen(
 
                         if (state.canAnotherGroup) {
                             Spacer(modifier = Modifier.height(16.dp))
+
                             Button(
                                 modifier = Modifier
                                     .padding(horizontal = 24.dp)
@@ -195,6 +196,8 @@ fun ReviewScreen(
                             ) {
                                 Text("再来一组", color = Color.Black)
                             }
+
+                            Spacer(modifier = Modifier.height(16.dp))
                         }
                     }
                 }

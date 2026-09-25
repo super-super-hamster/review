@@ -58,10 +58,12 @@ import com.hamster.review.compose.ItemGroup
 import com.hamster.review.compose.OptionDialog
 import com.hamster.review.compose.PageColumn
 import com.hamster.review.compose.ProgressBar
+import com.hamster.review.compose.ProgressDialog
 import com.hamster.review.compose.SharedTiltState
 import com.hamster.review.compose.SliderDialog
 import com.hamster.review.compose.rememberSharedTiltState
 import com.hamster.review.data.db.SubjectWithTodayCount
+import com.hamster.review.viewModel.MainViewModel
 import kotlin.math.min
 import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
@@ -69,6 +71,7 @@ import kotlinx.coroutines.launch
 
 @Composable
 fun MainScreen(
+    mainViewModel: MainViewModel,
     subjects: List<SubjectWithTodayCount>,
     onSetDailyLimit: (Long, Int) -> Unit,
     onAddSubject: (String) -> Unit,
@@ -93,7 +96,6 @@ fun MainScreen(
 
     setTopbarTitle("首页")
 
-    // 堆叠顺序：以当前顶层科目为起点旋转，例如顶层 3 -> 3 4 5 1 2
     val orderedSubjects = remember(subjects, homeTopSubjectId) {
         if (subjects.isEmpty()) {
             emptyList()
@@ -104,7 +106,6 @@ fun MainScreen(
         }
     }
 
-    // 顶层 id 失效（首次进入/科目被删）时回退到列表首个
     LaunchedEffect(subjects, homeTopSubjectId) {
         if (subjects.isEmpty()) {
             if (homeTopSubjectId != null) onHomeTopSubjectIdChange(null)
@@ -291,6 +292,16 @@ fun MainScreen(
             )
         }
 
+        mainViewModel.bankUpdateState?.let { update ->
+            ProgressDialog(
+                title = "更新题库",
+                text = update.text,
+                progress = update.progress,
+                onCancel = {
+                    if (update.cancelable) mainViewModel.cancelBankUpdate()
+                }
+            )
+        }
     }
 }
 

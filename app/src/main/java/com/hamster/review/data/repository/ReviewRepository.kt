@@ -21,6 +21,7 @@ import com.hamster.review.data.model.DAILY_REVIEW_LIMIT_PER_SUBJECT
 import com.hamster.review.data.model.FsrsRating
 import com.hamster.review.data.model.QuestionType
 import com.hamster.review.scheduler.FsrsScheduler
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
@@ -28,7 +29,10 @@ import java.security.MessageDigest
 import java.time.LocalDate
 import java.time.ZoneId
 import kotlin.math.min
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
@@ -717,47 +721,218 @@ class ReviewRepository(
 
     // ---------------- 官方题库同步 ----------------
 
-    // 更新提示文本
-    suspend fun updateOfficialBankFromGitHub(context: Context): String = try {
-        withContext(Dispatchers.IO) { doFetchAndApplyOfficialBank(context) }
+    /**
+     * 从 GitHub Release 更新官方题库，并把官方题合并进本地库。
+     *
+     * @param onProgress 进度回调：(当前操作文本, 进度 0f..1f, 是否允许取消)
+     *                   写入本地库的事务阶段 cancelable = false。
+     * @return 结果文本（成功 / 已是最新 / 更新失败原因）
+     */
+    suspend fun updateOfficialBankFromGitHub(
+        context: Context,
+        onProgress: suspend (text: String, progress: Float, cancelable: Boolean) -> Unit = { _, _, _ -> }
+    ): String = try {
+        withContext(Dispatchers.IO) { doFetchAndApplyOfficialBank(context, onProgress) }
+    } catch (e: CancellationException) {
+        throw e
     } catch (e: Exception) {
         "更新失败：${e.message ?: e.javaClass.simpleName}"
     }
 
-    private suspend fun doFetchAndApplyOfficialBank(context: Context): String {
+    private suspend fun doFetchAndApplyOfficialBank(
+        context: Context,
+        onProgress: suspend (text: String, progress: Float, cancelable: Boolean) -> Unit
+    ): String {
+        onProgress("正在检查题库版本", 0.02f, true)
         val metaText = fetchText("$QUESTION_BANK_RELEASE_BASE/questionbank.version.json")
         val meta = JSONObject(metaText)
         val version = meta.getInt("version")
         val sha = meta.optString("sha256")
         val fileName = meta.optString("file", "questionbank.db")
 
+        onProgress("正在对比题库版本", 0.07f, true)
         val prefs = context.getSharedPreferences(QUESTION_BANK_PREFS, Context.MODE_PRIVATE)
         val localVersion = prefs.getInt(QUESTION_BANK_VERSION_KEY, 0)
         val localSha = prefs.getString(QUESTION_BANK_SHA_KEY, "") ?: ""
         if (version < localVersion || (version == localVersion && localSha.equals(sha, ignoreCase = true))) {
+            onProgress("题库已是最新版本", 1f, true)
             return "题库已是最新版本"
         }
 
-        val bytes = fetchBytes("$QUESTION_BANK_RELEASE_BASE/$fileName")
+        // 下载阶段(10% -> 70%)：按已下载字节平滑推进，每块检查取消
+        onProgress("正在下载题库 0%", 0.10f, true)
+        val bytes = fetchBytes("$QUESTION_BANK_RELEASE_BASE/$fileName") { downloaded, total ->
+            val ratio = if (total > 0) (downloaded.toDouble() / total).toFloat() else 0f
+            onProgress("正在下载题库 ${(ratio * 100).toInt()}%", 0.10f + 0.60f * ratio, true)
+        }
+
+        onProgress("正在校验题库文件", 0.72f, true)
         if (sha.isNotBlank() && !sha256Hex(bytes).equals(sha, ignoreCase = true)) {
-            return "更新失败"
+            return "更新失败：题库文件校验不通过"
         }
 
         val cache = File(context.cacheDir, "official_bank_$version.db")
         cache.writeBytes(bytes)
         try {
+            onProgress("正在读取题库", 0.78f, true)
             val remote = openRemoteBank(context, cache)
             try {
+                // 写入阶段(85% -> 99%)：事务内不响应取消
+                onProgress("正在写入本地题库 0%", 0.85f, false)
+                applyOfficialBank(remote) { done, total ->
+                    val ratio = if (total > 0) done.toFloat() / total else 1f
+                    onProgress(
+                        "正在写入本地题库 ${(ratio * 100).toInt()}%",
+                        0.85f + 0.14f * ratio,
+                        false
+                    )
+                }
+                onProgress("正在保存题库信息", 0.99f, false)
                 prefs.edit {
                     putInt(QUESTION_BANK_VERSION_KEY, version)
                         .putString(QUESTION_BANK_SHA_KEY, sha)
                 }
+                onProgress("题库更新完成", 1f, false)
                 return "题库更新成功(版本 $version)"
             } finally {
                 remote.close()
             }
         } finally {
             cache.delete()
+        }
+    }
+
+    /**
+     * 把远端官方题库合并进本地库（单个事务）：
+     * - 科目按名称匹配，远端新科目会新建，远端已删除的科目本地保留；
+     * - 官方题按 officialId 对齐：新增 / 覆盖题型·题干·答案·选项 / 删除远端已移除的官方题；
+     * - 备注(explanation)：本地已有内容时保留，本地为空才用远端内容；
+     * - 用户自建题(officialId 为空)完全不动；题目行 id 不变，因此掌握状态与复习进度保留。
+     */
+    private suspend fun applyOfficialBank(
+        remote: AppDatabase,
+        onProgress: suspend (done: Int, total: Int) -> Unit
+    ) {
+        val remoteSubjects = remote.subjectDao().getAll()
+        val remoteQuestions = remote.questionDao().getAllQuestionDetails()
+        val total = remoteQuestions.size
+
+        db.withTransaction {
+            val localSubjectsByName = subjectDao.getAll().associateBy { it.name }
+            val subjectIdByRemoteId = mutableMapOf<Long, Long>()
+            remoteSubjects.forEach { remoteSubject ->
+                val existing = localSubjectsByName[remoteSubject.name]
+                subjectIdByRemoteId[remoteSubject.id] = existing?.id ?: subjectDao.insertAll(
+                    listOf(
+                        SubjectEntity(
+                            name = remoteSubject.name,
+                            sortOrder = remoteSubject.sortOrder,
+                            dailyLimit = remoteSubject.dailyLimit
+                        )
+                    )
+                )[0]
+            }
+
+            // 远端已删除的官方题：本地一并删除（级联清理选项/调度/日志/当天推送行）
+            val remoteOfficialIds = remoteQuestions.map { it.question.id }.toSet()
+            questionDao.getAllOfficial().forEach { local ->
+                val officialId = local.officialId
+                if (officialId != null && officialId !in remoteOfficialIds) {
+                    questionDao.deleteQuestion(local.id)
+                }
+            }
+
+            remoteQuestions.forEachIndexed { index, remoteDetail ->
+                val subjectId = subjectIdByRemoteId[remoteDetail.question.subjectId]
+                if (subjectId != null) {
+                    val localId = questionDao.getByOfficialId(remoteDetail.question.id)?.id
+                    if (localId == null) {
+                        // 新增官方题
+                        val now = System.currentTimeMillis()
+                        val newId = questionDao.insertAll(
+                            listOf(
+                                QuestionEntity(
+                                    subjectId = subjectId,
+                                    officialId = remoteDetail.question.id,
+                                    type = remoteDetail.question.type,
+                                    content = remoteDetail.question.content,
+                                    answer = remoteDetail.question.answer,
+                                    explanation = remoteDetail.question.explanation,
+                                    createdAt = now
+                                )
+                            )
+                        )[0]
+                        replaceOptionsAndTags(newId, remoteDetail)
+                        schedulerDao.upsert(
+                            SchedulerStateEntity(
+                                questionId = newId,
+                                state = CardState.NEW,
+                                dueDate = now,
+                                stability = 2.5,
+                                difficulty = 5.0,
+                                retrievability = 1.0,
+                                reps = 0,
+                                lapses = 0,
+                                lastReviewAt = null
+                            )
+                        )
+                    } else {
+                        // 已有官方题：覆盖题型/题干/答案/选项；备注仅本地为空时更新
+                        val localDetail = questionDao.getQuestionDetail(localId)
+                        val localExplanation = localDetail?.question?.explanation.orEmpty()
+                        questionDao.updateQuestionFields(
+                            id = localId,
+                            subjectId = subjectId,
+                            type = remoteDetail.question.type.name,
+                            content = remoteDetail.question.content,
+                            answer = remoteDetail.question.answer,
+                            explanation = if (localExplanation.isNotBlank()) {
+                                localExplanation
+                            } else {
+                                remoteDetail.question.explanation
+                            }
+                        )
+                        replaceOptionsAndTags(localId, remoteDetail)
+                    }
+                }
+                onProgress(index + 1, total)
+            }
+        }
+    }
+
+    /** 用远端内容重建某题的选项与标签关联。 */
+    private suspend fun replaceOptionsAndTags(localQuestionId: Long, remoteDetail: QuestionDetail) {
+        questionOptionDao.deleteByQuestionId(localQuestionId)
+        questionTagDao.deleteByQuestionId(localQuestionId)
+
+        val orderedOptions = remoteDetail.options.sortedBy { it.sortOrder }
+        if (orderedOptions.isNotEmpty()) {
+            questionOptionDao.insertAll(
+                orderedOptions.mapIndexed { index, option ->
+                    QuestionOptionEntity(
+                        questionId = localQuestionId,
+                        content = option.content,
+                        isCorrect = option.isCorrect,
+                        sortOrder = index
+                    )
+                }
+            )
+        }
+
+        if (remoteDetail.tags.isNotEmpty()) {
+            val tagIds = remoteDetail.tags.map { tag ->
+                tagDao.getByFullPath(tag.fullPath)?.id
+                    ?: tagDao.insertAll(
+                        listOf(
+                            TagEntity(
+                                name = tag.name,
+                                fullPath = tag.fullPath,
+                                sortOrder = tag.sortOrder
+                            )
+                        )
+                    )[0]
+            }
+            questionTagDao.insertAll(tagIds.map { tagId -> QuestionTagCrossRef(localQuestionId, tagId) })
         }
     }
 
@@ -795,13 +970,33 @@ class ReviewRepository(
         return String(bytes, Charsets.UTF_8)
     }
 
-    private suspend fun fetchBytes(url: String): ByteArray = withContext(Dispatchers.IO) {
+    /**
+     * 下载为字节数组。分块读取：每块回调已下载/总字节数，并检查协程取消，便于显示进度与随时终止。
+     */
+    private suspend fun fetchBytes(
+        url: String,
+        onBytes: suspend (downloaded: Long, total: Long) -> Unit = { _, _ -> }
+    ): ByteArray = withContext(Dispatchers.IO) {
         val connection = URL(url).openConnection() as HttpURLConnection
         connection.connectTimeout = 15_000
         connection.readTimeout = 15_000
         connection.instanceFollowRedirects = true
         try {
-            connection.inputStream.use { it.readBytes() }
+            val total = connection.contentLengthLong
+            val output = ByteArrayOutputStream()
+            connection.inputStream.use { input ->
+                val buffer = ByteArray(64 * 1024)
+                var downloaded = 0L
+                while (true) {
+                    currentCoroutineContext().ensureActive()
+                    val read = input.read(buffer)
+                    if (read < 0) break
+                    output.write(buffer, 0, read)
+                    downloaded += read
+                    onBytes(downloaded, total)
+                }
+            }
+            output.toByteArray()
         } finally {
             connection.disconnect()
         }

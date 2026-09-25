@@ -1,5 +1,7 @@
 package com.hamster.review.compose
 
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -27,6 +29,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDefaults
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
@@ -41,6 +44,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -278,7 +282,6 @@ fun SliderDialog(
     value: Float,
     onValueChange: (Float) -> Unit,
     valueRange: ClosedFloatingPointRange<Float> = 0f..1f,
-    /** 当前值的显示格式（实时拼在 content 行尾） */
     valueFormatter: (Float) -> String = { it.roundToInt().toString() },
     onCancel: () -> Unit = {},
     onDismissRequest: () -> Unit,
@@ -576,30 +579,82 @@ fun ConfirmDialog(
                     .height(42.dp),
                 horizontalArrangement = Arrangement.spacedBy(24.dp)
             ) {
-                Button(
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(42.dp),
-                    border = BorderStroke(1.dp, Color.LightGray),
-                    shape = squircleShape,
-                    colors = ButtonDefaults.textButtonColors(Color.Transparent),
-                    onClick = cancelAction
-                ) {
-                    Text(text = cancelText, color = Color.Gray)
+                if (cancelText.isNotEmpty()) {
+                    Button(
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(42.dp),
+                        border = BorderStroke(1.dp, Color.LightGray),
+                        shape = squircleShape,
+                        colors = ButtonDefaults.textButtonColors(Color.Transparent),
+                        onClick = cancelAction
+                    ) {
+                        Text(text = cancelText, color = Color.Gray)
+                    }
                 }
 
-                Button(
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(42.dp),
-                    border = BorderStroke(1.dp, Color.LightGray),
-                    shape = squircleShape,
-                    colors = ButtonDefaults.textButtonColors(confirmColor),
-                    onClick = confirmAction
-                ) {
-                    Text(text = confirmText, color = colorResource(R.color.text))
+                if (confirmText.isNotEmpty()) {
+                    Button(
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(42.dp),
+                        border = BorderStroke(1.dp, Color.LightGray),
+                        shape = squircleShape,
+                        colors = ButtonDefaults.textButtonColors(confirmColor),
+                        onClick = confirmAction
+                    ) {
+                        Text(text = confirmText, color = colorResource(R.color.text))
+                    }
                 }
             }
+        }
+    }
+}
+
+@Composable
+fun ProgressDialog(
+    title: String,
+    text: String,
+    progress: Float,
+    onCancel: () -> Unit,
+    cancelText: String = "取消"
+) {
+    val animatedProgress by animateFloatAsState(
+        targetValue = progress.coerceIn(0f, 1f),
+        animationSpec = tween(durationMillis = 300),
+        label = "progressDialog"
+    )
+
+    ConfirmDialog(
+        title = title,
+        cancelText = cancelText,
+        confirmText = "",
+        onCancel = {},
+        onDismissRequest = onCancel,
+        onConfirm = { false }
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(
+                text = text,
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.fillMaxWidth(),
+                textAlign = TextAlign.Center
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            LinearProgressIndicator(
+                progress = { animatedProgress },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(8.dp)
+                    .clip(squircleShape),
+                color = colorResource(R.color.mikuGreen),
+                trackColor = colorResource(R.color.mikuGreen).copy(alpha = 0.25f)
+            )
         }
     }
 }

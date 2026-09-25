@@ -10,10 +10,14 @@ import androidx.lifecycle.viewModelScope
 import com.hamster.review.data.db.AppDatabase
 import com.hamster.review.data.db.SubjectWithTodayCount
 import com.hamster.review.data.repository.ReviewRepository
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val repository = ReviewRepository(AppDatabase.getInstance(application))
@@ -51,23 +55,50 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /** 更新题库进度状态：text=当前操作，progress=0f..1f，cancelable=是否可取消。 */
+    data class BankUpdateState(
+        val text: String,
+        val progress: Float,
+        val cancelable: Boolean
+    )
+
     private var _bankUpdateBusy by mutableStateOf(false)
 
-    val bankUpdateBusy: Boolean
-        get() = _bankUpdateBusy
+    private var _bankUpdateState by mutableStateOf<BankUpdateState?>(null)
+    val bankUpdateState: BankUpdateState?
+        get() = _bankUpdateState
+
+    private var bankUpdateJob: Job? = null
 
     fun updateOfficialBank() {
         if (_bankUpdateBusy) return
-        viewModelScope.launch {
-            _bankUpdateBusy = true
+        _bankUpdateBusy = true
+        _bankUpdateState = BankUpdateState("正在检查题库版本", 0f, cancelable = true)
+        bankUpdateJob = viewModelScope.launch {
             try {
-                val message = repository.updateOfficialBankFromGitHub(getApplication())
+                val message = repository.updateOfficialBankFromGitHub(getApplication()) { text, progress, cancelable ->
+                    // 进度回调来自 IO 线程，切回主线程更新状态
+                    withContext(Dispatchers.Main) {
+                        _bankUpdateState = BankUpdateState(text, progress, cancelable)
+                    }
+                }
                 Toast.makeText(getApplication(), message, Toast.LENGTH_LONG).show()
+            } catch (e: CancellationException) {
+                Toast.makeText(getApplication(), "已取消题库更新", Toast.LENGTH_SHORT).show()
+                throw e
             } finally {
+                _bankUpdateState = null
                 _bankUpdateBusy = false
+                bankUpdateJob = null
             }
         }
     }
+
+    /** 用户取消本次题库更新（下载/校验阶段生效；写入阶段 cancelable=false）。 */
+    fun cancelBankUpdate() {
+        bankUpdateJob?.cancel()
+    }
+
 
 
     private var _topbarTitle by mutableStateOf("首页")
