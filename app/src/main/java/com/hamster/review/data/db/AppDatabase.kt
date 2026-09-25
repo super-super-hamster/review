@@ -5,8 +5,6 @@ import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.TypeConverters
-import androidx.room.migration.Migration
-import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
     entities = [
@@ -21,7 +19,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         DailySubjectQuestionEntity::class,
         DailyRecordEntity::class
     ],
-    version = 6,
+    version = AppDatabase.SCHEMA_VERSION,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -38,90 +36,11 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun dailySubjectQuestionDao(): DailySubjectQuestionDao
 
     companion object {
+        /** 当前 schema 版本。已无迁移逻辑，内置 asset 库与远端官方题库文件都必须等于该版本。 */
+        const val SCHEMA_VERSION = 6
+
         @Volatile
         private var INSTANCE: AppDatabase? = null
-        val MIGRATION_1_2 = object : Migration(1, 2) {
-            override fun migrate(db: SupportSQLiteDatabase) {
-                db.execSQL(
-                    """
-                    CREATE TABLE IF NOT EXISTS `daily_subject_records` (
-                        `subjectId` INTEGER NOT NULL,
-                        `date` TEXT NOT NULL,
-                        `completed` INTEGER NOT NULL,
-                        `completedAt` INTEGER,
-                        PRIMARY KEY(`subjectId`, `date`),
-                        FOREIGN KEY(`subjectId`) REFERENCES `subjects`(`id`) ON DELETE CASCADE
-                    )
-                    """
-                )
-                db.execSQL(
-                    "CREATE INDEX IF NOT EXISTS `index_daily_subject_records_subjectId` ON `daily_subject_records`(`subjectId`)"
-                )
-                db.execSQL(
-                    "CREATE INDEX IF NOT EXISTS `index_daily_subject_records_date` ON `daily_subject_records`(`date`)"
-                )
-            }
-        }
-
-        val MIGRATION_2_3 = object : Migration(2, 3) {
-            override fun migrate(db: SupportSQLiteDatabase) {
-                db.execSQL(
-                    "ALTER TABLE `daily_subject_records` ADD COLUMN `pushedCount` INTEGER NOT NULL DEFAULT 0"
-                )
-                db.execSQL(
-                    "ALTER TABLE `daily_subject_records` ADD COLUMN `completedCount` INTEGER NOT NULL DEFAULT 0"
-                )
-            }
-        }
-
-        val MIGRATION_3_4 = object : Migration(3, 4) {
-            override fun migrate(db: SupportSQLiteDatabase) {
-                db.execSQL(
-                    """
-                    CREATE TABLE IF NOT EXISTS `daily_subject_questions` (
-                        `subjectId` INTEGER NOT NULL,
-                        `date` TEXT NOT NULL,
-                        `questionId` INTEGER NOT NULL,
-                        `completed` INTEGER NOT NULL,
-                        `wrongPending` INTEGER NOT NULL,
-                        PRIMARY KEY(`subjectId`, `date`, `questionId`),
-                        FOREIGN KEY(`subjectId`) REFERENCES `subjects`(`id`) ON DELETE CASCADE,
-                        FOREIGN KEY(`questionId`) REFERENCES `questions`(`id`) ON DELETE CASCADE
-                    )
-                    """
-                )
-                db.execSQL(
-                    "CREATE INDEX IF NOT EXISTS `index_daily_subject_questions_subjectId` ON `daily_subject_questions`(`subjectId`)"
-                )
-                db.execSQL(
-                    "CREATE INDEX IF NOT EXISTS `index_daily_subject_questions_date` ON `daily_subject_questions`(`date`)"
-                )
-                db.execSQL(
-                    "CREATE INDEX IF NOT EXISTS `index_daily_subject_questions_questionId` ON `daily_subject_questions`(`questionId`)"
-                )
-            }
-        }
-
-        val MIGRATION_4_5 = object : Migration(4, 5) {
-            override fun migrate(db: SupportSQLiteDatabase) {
-                db.execSQL(
-                    "ALTER TABLE `subjects` ADD COLUMN `dailyLimit` INTEGER NOT NULL DEFAULT 10"
-                )
-            }
-        }
-
-        // 5->6: questions 增加 officialId(官方题库编号)列，并把存量行回填为自身 id。
-        // 存量库里的题目都来自内置默认题库(官方内容)，id 即官方编号；之后官方更新按 officialId 对齐。
-        val MIGRATION_5_6 = object : Migration(5, 6) {
-            override fun migrate(db: SupportSQLiteDatabase) {
-                db.execSQL("ALTER TABLE `questions` ADD COLUMN `officialId` INTEGER")
-                db.execSQL("UPDATE `questions` SET `officialId` = `id` WHERE `officialId` IS NULL")
-            }
-        }
-
-
-
-
 
         fun getInstance(context: Context): AppDatabase {
             return INSTANCE ?: synchronized(this) {
@@ -134,6 +53,7 @@ abstract class AppDatabase : RoomDatabase() {
                     )
 
                     // 预置题库 .db 存在时才使用；不存在时先建空库，避免首次启动崩溃。
+                    // 该 asset 库必须与当前 schema 版本(6)一致。
                     val hasDefaultDb = try {
                         appContext.assets.open("databases/default_questions.db").close()
                         true
@@ -145,8 +65,6 @@ abstract class AppDatabase : RoomDatabase() {
                     }
 
                     builder
-                        .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
-                        .fallbackToDestructiveMigration()
                         .build()
                         .also { INSTANCE = it }
                 }

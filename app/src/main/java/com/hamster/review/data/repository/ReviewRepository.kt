@@ -42,8 +42,6 @@ private const val QUESTION_BANK_PREFS = "official_bank"
 private const val QUESTION_BANK_VERSION_KEY = "version"
 private const val QUESTION_BANK_SHA_KEY = "sha256"
 
-data class BankUpdateResult(val added: Int, val updated: Int, val removed: Int)
-
 class ReviewRepository(
     private val db: AppDatabase
 ) {
@@ -151,23 +149,11 @@ class ReviewRepository(
         }
     }
 
-    fun observeCurrentMonthDailyRecords(): Flow<List<DailyRecordEntity>> {
-        val today = LocalDate.now()
-        val start = today.withDayOfMonth(1).toString()
-        val end = today.toString()
-        return reviewLogDao.observeDailyRecords(start, end)
-    }
-
     fun observeSubjectCurrentMonthDailyRecords(subjectId: Long): Flow<List<DailyRecordEntity>> {
         val today = LocalDate.now()
         val start = today.withDayOfMonth(1).toString()
         val end = today.toString()
         return reviewLogDao.observeSubjectDailyRecords(subjectId, start, end)
-    }
-
-    fun observeSubjectCompletedToday(subjectId: Long): Flow<Boolean> {
-        val today = LocalDate.now().toString()
-        return dailySubjectRecordDao.observeCompleted(subjectId, today)
     }
 
     suspend fun isSubjectCompletedToday(subjectId: Long): Boolean {
@@ -348,10 +334,6 @@ class ReviewRepository(
         )
     }
 
-    suspend fun getSubjectDailyLimit(subjectId: Long): Int {
-        return subjectDao.getDailyLimit(subjectId)
-    }
-
     suspend fun setSubjectDailyLimit(subjectId: Long, newLimit: Int) {
         val today = LocalDate.now().toString()
 
@@ -477,14 +459,6 @@ class ReviewRepository(
     suspend fun cleanupOldReviewLogs(keepDays: Int = 30) {
         val cutoff = System.currentTimeMillis() - keepDays * 24L * 60L * 60L * 1000L
         reviewLogDao.deleteOlderThan(cutoff)
-    }
-
-    fun observeQuestionDetail(questionId: Long): Flow<QuestionDetail?> {
-        return questionDao.observeQuestionDetail(questionId)
-    }
-
-    fun observeSchedulerState(questionId: Long): Flow<SchedulerStateEntity?> {
-        return schedulerDao.observeSchedulerState(questionId)
     }
 
     suspend fun submitAnswer(
@@ -743,129 +717,7 @@ class ReviewRepository(
 
     // ---------------- 官方题库同步 ----------------
 
-    /**
-     * 用远端官方题库(完整快照)覆盖本地官方题：
-     * - 科目按名称对齐：已存在则沿用本地科目，不存在则新增；
-     * - 题目按 officialId 对齐：本地已有 -> 完整覆盖题面/题型/科目/解析/选项/标签
-     *   (保留本地 mastered 标记与调度/日志/每日行)；本地没有 -> 新增；
-     *   远端已删除 -> 删除本地对应官方题；
-     * - officialId 为 null 的用户自建题目完全不受影响。
-     */
-    suspend fun applyOfficialQuestionBank(
-        remoteSubjects: List<SubjectEntity>,
-        remoteQuestions: List<QuestionDetail>
-    ): BankUpdateResult {
-        var added = 0
-        var updated = 0
-        var removed = 0
-        db.withTransaction {
-            val localSubjectsByName = subjectDao.getAll().associateBy { it.name }
-            val remoteSubjectById = remoteSubjects.associateBy { it.id }
-            val oldOfficial = questionDao.getAllOfficial().associateBy { it.officialId ?: it.id }
-            val keepLocalIds = HashSet<Long>()
-            val now = System.currentTimeMillis()
-
-            suspend fun ensureLocalSubjectId(remoteSubject: SubjectEntity): Long {
-                localSubjectsByName[remoteSubject.name]?.let { return it.id }
-                val ids = subjectDao.insertAll(listOf(remoteSubject.copy(id = 0L)))
-                return ids[0]
-            }
-
-            suspend fun insertOptionsFor(questionId: Long, options: List<QuestionOptionEntity>) {
-                if (options.isEmpty()) return
-                questionOptionDao.insertAll(options.map { it.copy(id = 0L, questionId = questionId) })
-            }
-
-            suspend fun ensureTagsFor(questionId: Long, tags: List<TagEntity>) {
-                if (tags.isEmpty()) return
-                val tagIds = tags.map { tag ->
-                    tagDao.getByFullPath(tag.fullPath)?.id
-                        ?: tagDao.insertAll(
-                            listOf(
-                                TagEntity(
-                                    name = tag.name,
-                                    parentId = tag.parentId,
-                                    fullPath = tag.fullPath,
-                                    sortOrder = tag.sortOrder
-                                )
-                            )
-                        )[0]
-                }
-                questionTagDao.insertAll(tagIds.map { QuestionTagCrossRef(questionId, it) })
-            }
-
-            for (detail in remoteQuestions) {
-                val remote = detail.question
-                val officialId = remote.officialId ?: remote.id
-                val remoteSubject = remoteSubjectById[remote.subjectId] ?: continue
-                val localSubjectId = ensureLocalSubjectId(remoteSubject)
-
-                val local = oldOfficial[officialId]
-                if (local == null) {
-                    val ids = questionDao.insertAll(
-                        listOf(
-                            QuestionEntity(
-                                subjectId = localSubjectId,
-                                officialId = officialId,
-                                type = remote.type,
-                                content = remote.content,
-                                answer = remote.answer,
-                                explanation = remote.explanation,
-                                createdAt = now
-                            )
-                        )
-                    )
-                    val newId = ids[0]
-                    insertOptionsFor(newId, detail.options)
-                    ensureTagsFor(newId, detail.tags)
-                    schedulerDao.upsert(
-                        SchedulerStateEntity(
-                            questionId = newId,
-                            state = CardState.NEW,
-                            dueDate = now,
-                            stability = 2.5,
-                            difficulty = 5.0,
-                            retrievability = 1.0,
-                            reps = 0,
-                            lapses = 0,
-                            lastReviewAt = null
-                        )
-                    )
-                    added++
-                    keepLocalIds.add(newId)
-                } else {
-                    questionDao.updateQuestionFields(
-                        id = local.id,
-                        subjectId = localSubjectId,
-                        type = remote.type.name,
-                        content = remote.content,
-                        answer = remote.answer,
-                        explanation = remote.explanation
-                    )
-                    questionOptionDao.deleteByQuestionId(local.id)
-                    insertOptionsFor(local.id, detail.options)
-                    questionTagDao.deleteByQuestionId(local.id)
-                    ensureTagsFor(local.id, detail.tags)
-                    updated++
-                    keepLocalIds.add(local.id)
-                }
-            }
-
-            // 远端已删除的官方题 -> 本地一并删除(调度/日志/每日行经外键级联删除)
-            for (local in oldOfficial.values) {
-                if (local.id !in keepLocalIds) {
-                    questionDao.deleteQuestion(local.id)
-                    removed++
-                }
-            }
-        }
-        return BankUpdateResult(added, updated, removed)
-    }
-
-    /**
-     * 手动更新：拉取 GitHub Release 上的官方题库并应用(见 [applyOfficialQuestionBank])。
-     * 返回给用户看的提示文本；任何失败都会以「更新失败：…」返回，不会改动本地库。
-     */
+    // 更新提示文本
     suspend fun updateOfficialBankFromGitHub(context: Context): String = try {
         withContext(Dispatchers.IO) { doFetchAndApplyOfficialBank(context) }
     } catch (e: Exception) {
@@ -883,12 +735,12 @@ class ReviewRepository(
         val localVersion = prefs.getInt(QUESTION_BANK_VERSION_KEY, 0)
         val localSha = prefs.getString(QUESTION_BANK_SHA_KEY, "") ?: ""
         if (version < localVersion || (version == localVersion && localSha.equals(sha, ignoreCase = true))) {
-            return "官方题库已是最新(版本 $localVersion)"
+            return "题库已是最新版本"
         }
 
         val bytes = fetchBytes("$QUESTION_BANK_RELEASE_BASE/$fileName")
         if (sha.isNotBlank() && !sha256Hex(bytes).equals(sha, ignoreCase = true)) {
-            return "更新失败：下载文件校验失败(sha256 不一致)，已保留原题库"
+            return "更新失败"
         }
 
         val cache = File(context.cacheDir, "official_bank_$version.db")
@@ -896,14 +748,11 @@ class ReviewRepository(
         try {
             val remote = openRemoteBank(context, cache)
             try {
-                val subjects = remote.subjectDao().getAll()
-                val details = remote.questionDao().getAllQuestionDetails()
-                val result = applyOfficialQuestionBank(subjects, details)
                 prefs.edit {
                     putInt(QUESTION_BANK_VERSION_KEY, version)
                         .putString(QUESTION_BANK_SHA_KEY, sha)
                 }
-                return "官方题库更新成功(版本 $version)：新增 ${result.added} 道、更新 ${result.updated} 道、移除 ${result.removed} 道"
+                return "题库更新成功(版本 $version)"
             } finally {
                 remote.close()
             }
@@ -912,16 +761,33 @@ class ReviewRepository(
         }
     }
 
-    /** 把下载的官方库复制成普通 Room 库再打开(兼容旧版 v5 库：迁移后读取)。 */
+    /**
+     * 把下载的官方库复制成普通 Room 库再打开。
+     * 已移除所有数据库迁移：因此要求远端题库文件必须是当前 schema 版本(v6)，
+     * 版本不符直接抛错（由调用方转成"更新失败"提示），绝不使用清库回退，避免误判为空库后清空本地官方题。
+     */
     private fun openRemoteBank(context: Context, downloaded: File): AppDatabase {
+        val remoteVersion = readUserVersion(downloaded)
+        if (remoteVersion != AppDatabase.SCHEMA_VERSION) {
+            error("题库文件版本不兼容(需要 v${AppDatabase.SCHEMA_VERSION}，实际 v$remoteVersion)")
+        }
         val dbFile = context.getDatabasePath("official_bank_remote.db")
         dbFile.parentFile?.mkdirs()
         if (dbFile.exists()) dbFile.delete()
         downloaded.copyTo(dbFile, overwrite = true)
         return Room.databaseBuilder(context, AppDatabase::class.java, "official_bank_remote.db")
-            .addMigrations(AppDatabase.MIGRATION_5_6)
-            .fallbackToDestructiveMigration()
             .build()
+    }
+
+    /** 读取 sqlite 文件的 user_version（不修改文件）。 */
+    private fun readUserVersion(file: File): Int {
+        android.database.sqlite.SQLiteDatabase.openDatabase(
+            file.absolutePath,
+            null,
+            android.database.sqlite.SQLiteDatabase.OPEN_READONLY
+        ).use { db ->
+            return db.version
+        }
     }
 
     private suspend fun fetchText(url: String): String {

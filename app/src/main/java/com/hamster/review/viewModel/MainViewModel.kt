@@ -53,11 +53,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private var _bankUpdateBusy by mutableStateOf(false)
 
-    /** 是否正在更新官方题库。 */
     val bankUpdateBusy: Boolean
         get() = _bankUpdateBusy
 
-    /** 手动更新官方题库(GitHub Release)，结果用 Toast 提示。 */
     fun updateOfficialBank() {
         if (_bankUpdateBusy) return
         viewModelScope.launch {

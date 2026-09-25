@@ -63,6 +63,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.hamster.review.R
 import kotlinx.coroutines.delay
+import kotlin.math.roundToInt
 
 @Composable
 fun EditTextDialog(
@@ -277,6 +278,8 @@ fun SliderDialog(
     value: Float,
     onValueChange: (Float) -> Unit,
     valueRange: ClosedFloatingPointRange<Float> = 0f..1f,
+    /** 当前值的显示格式（实时拼在 content 行尾） */
+    valueFormatter: (Float) -> String = { it.roundToInt().toString() },
     onCancel: () -> Unit = {},
     onDismissRequest: () -> Unit,
     onConfirm: () -> Boolean,
@@ -307,14 +310,17 @@ fun SliderDialog(
             success
         }
     ) {
-        if (content.isNotEmpty()) {
-            Text(
-                text = content,
-                style = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier.fillMaxWidth(),
-                textAlign = TextAlign.Center
-            )
-        }
+        // 当前值实时拼在 content 行尾（拖动时随 value 变化刷新）
+        Text(
+            text = if (content.isEmpty()) {
+                valueFormatter(value)
+            } else {
+                "$content ${valueFormatter(value)}"
+            },
+            style = MaterialTheme.typography.bodyMedium,
+            modifier = Modifier.fillMaxWidth(),
+            textAlign = TextAlign.Center
+        )
 
         Spacer(modifier = Modifier.height(24.dp))
 
@@ -323,7 +329,7 @@ fun SliderDialog(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Text(text = String.format(currentLocale, "%+.1f", valueRange.start), fontSize = 12.sp, color = colorResource(R.color.text))
+            Text(text = String.format(currentLocale, "%d", valueRange.start.roundToInt()), fontSize = 12.sp, color = colorResource(R.color.text))
 
             Spacer(modifier = Modifier.width(8.dp))
 
@@ -341,7 +347,7 @@ fun SliderDialog(
 
             Spacer(modifier = Modifier.width(8.dp))
 
-            Text(text = String.format(currentLocale, "%+.1f", valueRange.endInclusive), fontSize = 12.sp, color = colorResource(R.color.text))
+            Text(text = String.format(currentLocale, "%d", valueRange.endInclusive.roundToInt()), fontSize = 12.sp, color = colorResource(R.color.text))
         }
     }
 }

@@ -242,61 +242,55 @@ fun MainScreen(
         )
     }
 
-    PageColumn(sharedTiltState = sharedTiltState) {
-        Column(
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth()
-                .verticalScroll(rememberScrollState())
-        ) {
-            ItemGroup(titleState = sharedTiltState) {
-                ClickItem(
-                    title = "创建科目",
-                    icon = R.drawable.add_line
-                ) {
-                    showAddSubjectDialog = true
-                }
-
-                ClickItem(
-                    title = "更新题库",
-                    icon = R.drawable.update
-                ) {
-                    showBankUpdateDialog = true
-                }
+    PageColumn(modifier = Modifier.verticalScroll(rememberScrollState()), sharedTiltState = sharedTiltState) {
+        ItemGroup(titleState = sharedTiltState) {
+            ClickItem(
+                title = "创建科目",
+                icon = R.drawable.add_line
+            ) {
+                showAddSubjectDialog = true
             }
 
-            Spacer(modifier = Modifier.height(dimensionResource(R.dimen.item_group_gap)))
-
-            if (subjects.isNotEmpty()) {
-                SubjectStack(
-                    ordered = orderedSubjects,
-                    expanded = homeExpanded,
-                    onExpandChange = onHomeExpandedChange,
-                    sharedTiltState = sharedTiltState,
-                    onNavigate = onNavigate,
-                    setTopbarTitle = setTopbarTitle,
-                    onLongPress = { longPressSubject = it },
-                    onSwipeTop = { newTopId -> onHomeTopSubjectIdChange(newTopId) }
-                )
-
-                Spacer(modifier = Modifier.height(dimensionResource(R.dimen.item_group_gap)))
-            }
-
-            if (showBankUpdateDialog) {
-                InquiryDialog(
-                    title = "更新题库",
-                    content = "将下载最新题库并覆盖当前题库。\n用户创建的题目不会被覆盖",
-                    confirmText = "更新",
-                    onCancel = { showBankUpdateDialog = false },
-                    onDismissRequest = { showBankUpdateDialog = false },
-                    onConfirm = {
-                        showBankUpdateDialog = false
-                        onUpdateOfficialBank()
-                        true
-                    }
-                )
+            ClickItem(
+                title = "更新题库",
+                icon = R.drawable.update
+            ) {
+                showBankUpdateDialog = true
             }
         }
+
+        Spacer(modifier = Modifier.height(dimensionResource(R.dimen.item_group_gap)))
+
+        if (subjects.isNotEmpty()) {
+            SubjectStack(
+                ordered = orderedSubjects,
+                expanded = homeExpanded,
+                onExpandChange = onHomeExpandedChange,
+                sharedTiltState = sharedTiltState,
+                onNavigate = onNavigate,
+                setTopbarTitle = setTopbarTitle,
+                onLongPress = { longPressSubject = it },
+                onSwipeTop = { newTopId -> onHomeTopSubjectIdChange(newTopId) }
+            )
+
+            Spacer(modifier = Modifier.height(dimensionResource(R.dimen.item_group_gap)))
+        }
+
+        if (showBankUpdateDialog) {
+            InquiryDialog(
+                title = "更新题库",
+                content = "将下载最新题库并覆盖当前题库。\n用户创建的题目不会被覆盖",
+                confirmText = "更新",
+                onCancel = { showBankUpdateDialog = false },
+                onDismissRequest = { showBankUpdateDialog = false },
+                onConfirm = {
+                    showBankUpdateDialog = false
+                    onUpdateOfficialBank()
+                    true
+                }
+            )
+        }
+
     }
 }
 
@@ -422,7 +416,6 @@ private fun SubjectStack(
         scope.launch { dragX.snapTo(dragX.value + delta) }
     }
 
-    // 左滑 = 下一张（顶层跟手左移，露出下层卡片）；右滑 = 上一张（贴在左侧随手指一起右移）
     var instantId by remember { mutableStateOf<Long?>(null) }
     var instantTick by remember { mutableIntStateOf(0) }
     LaunchedEffect(instantTick) {
@@ -439,7 +432,6 @@ private fun SubjectStack(
     ) {
         ordered.forEachIndexed { index, subject ->
             key(subject.subject.id) {
-                // 右滑期间：被“上一张”覆盖的那张底层同题先隐藏，避免重影
                 val isIncomingTarget = !expanded && canSwitch &&
                     incomingVisible && index == size - 1
                 val slot = if (isIncomingTarget) STACK_SLOTS[0] else STACK_SLOTS[min(index, 2)]
@@ -498,7 +490,6 @@ private fun SubjectStack(
                     alphaMultiplier = if (isIncomingTarget) 0f else 1f,
                     overlay = {
                         if (canSwitch && index == 0) {
-                            // 整行可点、无水波纹
                             Box(
                                 modifier = Modifier
                                     .align(Alignment.BottomCenter)
@@ -547,7 +538,6 @@ private fun SubjectStack(
     }
 }
 
-/** 单张堆叠卡片：在堆叠槽位与展开列表位置之间用弹簧动画过渡。 */
 @Composable
 private fun StackCard(
     subject: SubjectWithTodayCount,

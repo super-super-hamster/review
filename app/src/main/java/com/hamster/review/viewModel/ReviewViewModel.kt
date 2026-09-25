@@ -99,6 +99,12 @@ class ReviewViewModel(
 
     private val completedInSession = mutableSetOf<Long>()
 
+    /** 今日答错过的题：需要连续答对 REQUIRED_CORRECT_STREAK 次才算完成。仅会话内有效。 */
+    private val wrongQuestions = mutableSetOf<Long>()
+
+    /** 错题当前的连续答对次数；答错即清零。仅会话内有效。 */
+    private val correctStreak = mutableMapOf<Long, Int>()
+
     private data class WrongReviewItem(
         val question: QuestionDetail,
         var remainingGap: Int
@@ -106,6 +112,9 @@ class ReviewViewModel(
 
     companion object {
         private const val WRONG_REVIEW_GAP = 3
+
+        /** 错题需要连续答对的次数。 */
+        private const val REQUIRED_CORRECT_STREAK = 3
     }
 
 
@@ -163,8 +172,16 @@ class ReviewViewModel(
         val state = _uiState.value
         val current = state.currentQuestion ?: return
         val correct = state.lastResultCorrect ?: return
-        // 测试模式答错不回队重答，仅置为未掌握
-        if (!isMasteredTest && !correct && !state.mastered) {
+        val questionId = current.question.id
+        val streak = correctStreak[questionId] ?: 0
+
+        // 需要重问的情况：
+        // - 答错（错题重新排队）；
+        // - 错题答对但连续答对次数还没达标。
+        // 测试模式答错不回队重答（仅置为未掌握）。
+        val needsRepeat = !isMasteredTest && !state.mastered &&
+            (!correct || (questionId in wrongQuestions && streak < REQUIRED_CORRECT_STREAK))
+        if (needsRepeat) {
             wrongQueue.addLast(WrongReviewItem(current, WRONG_REVIEW_GAP + 1))
         }
 
@@ -244,6 +261,8 @@ class ReviewViewModel(
     fun deleteQuestion(questionId: Long) {
         viewModelScope.launch {
             repository.deleteQuestion(questionId)
+            wrongQuestions.remove(questionId)
+            correctStreak.remove(questionId)
             _uiState.update { state ->
                 val newQueue = normalQueue.filterNot { it.question.id == questionId }
                 normalQueue.clear()
@@ -313,6 +332,8 @@ class ReviewViewModel(
             normalQueue.clear()
             wrongQueue.clear()
             completedInSession.clear()
+            wrongQuestions.clear()
+            correctStreak.clear()
 
             if (alreadyCompleted) {
                 _uiState.value = ReviewUiState(
@@ -375,6 +396,8 @@ class ReviewViewModel(
             normalQueue.clear()
             wrongQueue.clear()
             completedInSession.clear()
+            wrongQuestions.clear()
+            correctStreak.clear()
 
             val mastered = repository.getMasteredQuestionsOnce(subjectId).shuffled()
             masteredTestTotal = mastered.size
@@ -451,21 +474,35 @@ class ReviewViewModel(
             return
         }
 
+        val questionId = question.question.id
+        val wasWrongBefore = questionId in wrongQuestions
+
+        // 错题规则：连续答对 3 次才算完成；中途答错清零重来
+        val newStreak = if (isCorrect) (correctStreak[questionId] ?: 0) + 1 else 0
+        if (isCorrect) {
+            if (wasWrongBefore) correctStreak[questionId] = newStreak
+        } else {
+            wrongQuestions.add(questionId)
+            correctStreak[questionId] = 0
+        }
+        val completed = isCorrect && (!wasWrongBefore || newStreak >= REQUIRED_CORRECT_STREAK)
+
         viewModelScope.launch {
             withContext(NonCancellable) {
                 repository.submitAnswer(
-                    questionId = question.question.id,
+                    questionId = questionId,
                     isCorrect = isCorrect,
                     responseTimeMs = responseTime
                 )
-                if (isCorrect) {
-                    repository.markDailyQuestionCompleted(subjectId, question.question.id)
-                    if (completedInSession.add(question.question.id)) {
+                if (completed) {
+                    repository.markDailyQuestionCompleted(subjectId, questionId)
+                    if (completedInSession.add(questionId)) {
                         repository.incrementSubjectCompletedCount(subjectId)
                     }
-                } else {
-                    repository.markDailyQuestionWrong(subjectId, question.question.id)
+                } else if (!isCorrect) {
+                    repository.markDailyQuestionWrong(subjectId, questionId)
                 }
+                // 错题答对但未达标：保持 pending（wrongPending 维持此前状态），稍后重新提问
             }
             _uiState.update {
                 it.copy(
