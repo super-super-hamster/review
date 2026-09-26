@@ -56,6 +56,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.colorResource
 import androidx.compose.ui.res.dimensionResource
 import androidx.compose.ui.res.painterResource
@@ -353,7 +354,6 @@ private fun ColumnScope.ReviewQuestionSection(
 
     Spacer(modifier = Modifier.height(dimensionResource(R.dimen.item_group_gap)))
 
-    // 题目卡片：占满剩余空间。题面固定最上方(过长可滚动)，备注/选项/答案固定在最下方
     ItemGroup(
         titleState = titleState,
         modifier = Modifier.weight(1f),
@@ -409,14 +409,24 @@ private fun ColumnScope.ReviewQuestionSection(
                             modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
                         )
                     } else {
-                        Text(
-                            text = if (isEditing) "答案：\n$editAnswer" else "答案：\n${question.question.answer.orEmpty()}",
-                            fontSize = 18.sp,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier
-                                .padding(vertical = 4.dp)
-                                .then(if (isEditing) Modifier.clickable { editingField = "answer" } else Modifier)
-                        )
+                        Column(modifier = Modifier.fillMaxWidth()) {
+                            Text(
+                                text = "答案：",
+                                fontSize = 18.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .then(if (isEditing) Modifier.clickable { editingField = "answer" } else Modifier)
+                            ) {
+                                MarkdownContent(
+                                    modifier = Modifier.padding(vertical = 4.dp),
+                                    content = if (isEditing) editAnswer else question.question.answer.orEmpty(),
+                                    fontSize = 18.sp
+                                )
+                            }
+                        }
                     }
                 }
 
@@ -430,12 +440,23 @@ private fun ColumnScope.ReviewQuestionSection(
                             modifier = Modifier.fillMaxWidth()
                         )
                     } else {
-                        Text(
-                            text = if (isEditing) "备注：$editExplanation" else "备注：${question.question.explanation}",
-                            fontSize = 14.sp,
-                            modifier = Modifier
-                                .then(if (isEditing) Modifier.clickable { editingField = "explanation" } else Modifier)
-                        )
+                        // 备注用 MarkdownContent 渲染，支持公式块；标签单独一行
+                        Column(modifier = Modifier.fillMaxWidth()) {
+                            Text(
+                                text = "备注：",
+                                fontSize = 14.sp
+                            )
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .then(if (isEditing) Modifier.clickable { editingField = "explanation" } else Modifier)
+                            ) {
+                                MarkdownContent(
+                                    content = if (isEditing) editExplanation else question.question.explanation,
+                                    fontSize = 14.sp
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -782,10 +803,32 @@ private fun optionBackground(
 }
 
 
+/**
+ * 逐行渲染 Markdown：
+ * 每个 '\n' 都真实产生一次换行（不再依赖解析器的软/硬换行），空行占一整行高度。
+ * 围栏代码块(```math / ```latex / ```)会整体保留，公式内部换行不受影响。
+ */
 @Composable
 private fun MarkdownContent(modifier: Modifier = Modifier, content: String, fontSize: TextUnit = 12.sp) {
+    val blocks = remember(content) { splitMarkdownBlocks(content) }
+    val blankLineHeight = with(LocalDensity.current) { (fontSize.toPx() * 1.5f).toDp() }
+
+    Column(modifier = modifier) {
+        blocks.forEach { block ->
+            if (block.isBlank()) {
+                // 空行也占一整行，保证 '\n' 与换行严格 1:1
+                Spacer(modifier = Modifier.height(blankLineHeight))
+            } else {
+                MarkdownBlock(content = block, fontSize = fontSize)
+            }
+        }
+    }
+}
+
+/** 单个 Markdown 块：一行文本，或一个完整的围栏代码块。 */
+@Composable
+private fun MarkdownBlock(content: String, fontSize: TextUnit) {
     Markdown(
-        modifier = modifier,
         content = content,
         components = markdownComponents(
             codeFence = { model ->
@@ -829,6 +872,35 @@ private fun MarkdownContent(modifier: Modifier = Modifier, content: String, font
             )
         )
     )
+}
+
+/**
+ * 按 '\n' 逐行拆分：
+ * - 围栏代码块(以 ``` 开头到下一个 ``` 结束)合并为一个整体块；
+ * - 其余每个换行都拆成独立块（空行 → 空字符串块）。
+ */
+private fun splitMarkdownBlocks(content: String): List<String> {
+    val lines = content.split("\n")
+    val blocks = mutableListOf<String>()
+    var index = 0
+    while (index < lines.size) {
+        val line = lines[index]
+        if (line.trimStart().startsWith("```")) {
+            val fence = StringBuilder(line)
+            index++
+            while (index < lines.size) {
+                val current = lines[index]
+                fence.append("\n").append(current)
+                index++
+                if (current.trimStart().startsWith("```")) break
+            }
+            blocks.add(fence.toString())
+        } else {
+            blocks.add(line)
+            index++
+        }
+    }
+    return blocks
 }
 
 @Composable

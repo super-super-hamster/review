@@ -430,6 +430,11 @@ class ReviewViewModel(
         }
     }
 
+    /**
+     * 递减错题间隔；到期(remainingGap <= 0)的错题插到 normalQueue 的"第 3 位"(下标 2)，
+     * 即答错后中间隔 5 道题再次出现；剩余不足 3 道时自然落到末尾。
+     * 多道同时到期时按答错先后依次排开。
+     */
     private fun advanceWrongQueue() {
         val ready = mutableListOf<QuestionDetail>()
         val iterator = wrongQueue.iterator()
@@ -441,7 +446,10 @@ class ReviewViewModel(
                 iterator.remove()
             }
         }
-        normalQueue.addAll(ready)
+        ready.forEachIndexed { index, question ->
+            val targetIndex = (WRONG_REVIEW_GAP - 1 + index).coerceAtMost(normalQueue.size)
+            normalQueue.add(targetIndex, question)
+        }
     }
 
 
