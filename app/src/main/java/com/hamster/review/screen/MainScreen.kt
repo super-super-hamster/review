@@ -1,8 +1,8 @@
 package com.hamster.review.screen
 
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -29,7 +29,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
-import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -43,6 +43,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.colorResource
 import androidx.compose.ui.res.dimensionResource
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -66,7 +67,7 @@ import com.hamster.review.data.db.SubjectWithTodayCount
 import com.hamster.review.viewModel.MainViewModel
 import kotlin.math.min
 import kotlin.math.roundToInt
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
 @Composable
@@ -370,7 +371,7 @@ fun SubjectCard(
 }
 
 /** 堆叠槽位参数：近大远小 + 间距递增（非等差），底层不透明。 */
-private data class StackSlot(val scale: Float, val x: Dp, val y: Dp)
+internal data class StackSlot(val scale: Float, val x: Dp, val y: Dp)
 
 private val STACK_SLOTS = listOf(
     StackSlot(scale = 1.00f, x = 0.dp, y = 0.dp),
@@ -379,6 +380,58 @@ private val STACK_SLOTS = listOf(
 )
 
 private val StackSpring = spring<Float>(dampingRatio = 0.85f, stiffness = 350f)
+
+internal data class StackCardPlacement(
+    val slot: StackSlot,
+    val translationX: Float,
+    val zIndex: Float,
+    val visible: Boolean
+)
+
+private fun stackSlot(index: Int) = STACK_SLOTS[min(index, STACK_SLOTS.lastIndex)]
+
+/** 所有卡片共享一次切换进度，终点与重排后的静态槽位完全一致。 */
+internal fun stackCardPlacement(
+    index: Int,
+    size: Int,
+    dragX: Float,
+    screenWidthPx: Float,
+    settleProgress: Float
+): StackCardPlacement {
+    val progress = settleProgress.coerceIn(0f, 1f)
+    val previous = dragX > 0f && size > 1
+    val next = dragX < 0f && size > 1
+    if (previous && index == size - 1) {
+        return StackCardPlacement(
+            slot = STACK_SLOTS[0],
+            translationX = (dragX - screenWidthPx) * (1f - progress),
+            zIndex = 200f,
+            visible = true
+        )
+    }
+
+    val start = stackSlot(index)
+    val end = when {
+        previous -> stackSlot(index + 1)
+        next && index > 0 -> stackSlot(index - 1)
+        else -> start
+    }
+    return StackCardPlacement(
+        slot = StackSlot(
+            scale = start.scale + (end.scale - start.scale) * progress,
+            x = start.x + (end.x - start.x) * progress,
+            y = start.y + (end.y - start.y) * progress
+        ),
+        translationX = when {
+            index != 0 -> 0f
+            previous -> dragX * (1f - progress)
+            next -> dragX + (-screenWidthPx - dragX) * progress
+            else -> 0f
+        },
+        zIndex = (100 - index).toFloat(),
+        visible = index < 3 || (next && index == 3)
+    )
+}
 
 @Composable
 private fun SubjectStack(
@@ -397,7 +450,7 @@ private fun SubjectStack(
 
     val density = LocalDensity.current
     val screenWidthPx = with(density) { LocalConfiguration.current.screenWidthDp.dp.toPx() }
-    val thresholdPx = with(density) { 120.dp.toPx() }
+    val thresholdPx = with(density) { 60.dp.toPx() }
     val cardHeight = 128.dp
     val gap = dimensionResource(R.dimen.item_group_gap)
 
@@ -419,132 +472,159 @@ private fun SubjectStack(
         label = "stackHeight"
     )
 
-    val dragX = remember { Animatable(0f) }
+    var dragX by remember { mutableFloatStateOf(0f) }
+    var settleProgress by remember { mutableFloatStateOf(0f) }
+    var isSettling by remember { mutableStateOf(false) }
+    var swipeOrder by remember { mutableStateOf<List<SubjectWithTodayCount>?>(null) }
+    var pendingTopId by remember { mutableStateOf<Long?>(null) }
+    var settleJob by remember { mutableStateOf<Job?>(null) }
     val scope = rememberCoroutineScope()
-    val incomingVisible = dragX.value > 0.5f
 
-    val dragState = rememberDraggableState { delta ->
-        scope.launch { dragX.snapTo(dragX.value + delta) }
+    fun resetSwipe() {
+        dragX = 0f
+        settleProgress = 0f
+        swipeOrder = null
+        pendingTopId = null
+        isSettling = false
     }
 
-    var instantId by remember { mutableStateOf<Long?>(null) }
-    var instantTick by remember { mutableIntStateOf(0) }
-    LaunchedEffect(instantTick) {
-        if (instantId != null) {
-            delay(400)
-            instantId = null
+    // 数据成员变化或展开时取消手势；单纯循环重排不打断交接。
+    LaunchedEffect(ordered.map { it.subject.id }.toSet(), expanded) {
+        settleJob?.cancel()
+        resetSwipe()
+    }
+    LaunchedEffect(ordered.first().subject.id, pendingTopId) {
+        if (pendingTopId == ordered.first().subject.id) resetSwipe()
+    }
+
+    val dragState = rememberDraggableState { delta ->
+        if (!isSettling) {
+            dragX = (dragX + delta).coerceIn(-screenWidthPx, screenWidthPx)
         }
     }
 
+    fun finishDrag() {
+        if (isSettling) return
+        val source = swipeOrder ?: ordered
+        if (source.size < 2) {
+            resetSwipe()
+            return
+        }
+        val target = when {
+            dragX < -thresholdPx -> source[1].subject.id
+            dragX > thresholdPx -> source.last().subject.id
+            else -> null
+        }
+        isSettling = true
+        settleJob = scope.launch {
+            if (target == null) {
+                animate(
+                    initialValue = dragX,
+                    targetValue = 0f,
+                    animationSpec = spring(dampingRatio = 1f, stiffness = 350f)
+                ) { value, _ -> dragX = value }
+                resetSwipe()
+            } else {
+                animate(0f, 1f, animationSpec = tween(200)) { value, _ ->
+                    settleProgress = value
+                }
+                // 保留动画终态，直到父级确实应用新顺序后再一起清理。
+                pendingTopId = target
+                onSwipeTop(target)
+            }
+        }
+    }
+
+    val displayed = swipeOrder ?: ordered
+    val moving = !expanded && canSwitch && dragX != 0f
     Box(
         modifier = Modifier
             .fillMaxWidth()
             .height(containerHeight)
     ) {
-        ordered.forEachIndexed { index, subject ->
-            key(subject.subject.id) {
-                val isIncomingTarget = !expanded && canSwitch &&
-                    incomingVisible && index == size - 1
-                val slot = if (isIncomingTarget) STACK_SLOTS[0] else STACK_SLOTS[min(index, 2)]
-                val isTop = index == 0 && !expanded
-                StackCard(
-                    subject = subject,
-                    index = index,
-                    expansion = expansion.value,
-                    listY = (cardHeight + gap) * index,
-                    stackSlot = slot,
-                    sharedTiltState = sharedTiltState,
-                    onNavigate = onNavigate,
-                    setTopbarTitle = setTopbarTitle,
-                    onLongPress = { onLongPress(subject) },
-                    interactive = expanded || index == 0,
-                    instantSlot = subject.subject.id == instantId,
-                    cardModifier = if (isTop && canSwitch) {
-                        Modifier.draggable(
-                            state = dragState,
-                            orientation = Orientation.Horizontal,
-                            onDragStarted = {
-                                // 新手势从当前位置开始（卡片完全跟手）
-                                scope.launch { dragX.snapTo(0f) }
-                            },
-                            onDragStopped = {
-                                // 最终是否切换只看松手时卡片的位置
-                                if (dragX.value < -thresholdPx) {
-                                    // 左滑：顶层继续向左滑出，露出下一张
-                                    scope.launch {
-                                        val outgoingId = ordered[0].subject.id
-                                        dragX.animateTo(-screenWidthPx, tween(200))
-                                        instantId = outgoingId
-                                        onSwipeTop(ordered[1 % size].subject.id)
-                                        dragX.snapTo(0f)
-                                        instantTick++
-                                    }
-                                } else if (dragX.value > thresholdPx) {
-                                    // 右滑：顶层继续向右滑出，贴在左侧的上一张同步来到中间
-                                    scope.launch {
-                                        val outgoingId = ordered[0].subject.id
-                                        dragX.animateTo(screenWidthPx, tween(200))
-                                        instantId = outgoingId
-                                        onSwipeTop(ordered[(size - 1) % size].subject.id)
-                                        dragX.snapTo(0f)
-                                        instantTick++
-                                    }
-                                } else {
-                                    scope.launch { dragX.animateTo(0f, spring()) }
-                                }
-                            }
-                        )
-                    } else {
-                        Modifier
-                    },
-                    extraTranslationX = if (isTop) dragX.value else 0f,
-                    alphaMultiplier = if (isIncomingTarget) 0f else 1f,
-                    overlay = {
-                        if (canSwitch && index == 0) {
-                            Box(
-                                modifier = Modifier
-                                    .align(Alignment.BottomCenter)
-                                    .fillMaxWidth()
-                                    .height(24.dp)
-                                    .clickable(
-                                        interactionSource = remember { MutableInteractionSource() },
-                                        indication = null
-                                    ) {
-                                        onExpandChange(!expanded)
-                                    },
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    painter = painterResource(
-                                        if (expanded) R.drawable.arrow_up_line else R.drawable.arrow_down_line
-                                    ),
-                                    contentDescription = if (expanded) "收起科目" else "展开所有科目",
-                                    tint = colorResource(R.color.icon),
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
-                        }
-                    }
-                )
-            }
-        }
-
-        // 右滑期间贴在左侧的“上一张”（随顶层卡片一起右移）
-        if (!expanded && canSwitch && incomingVisible) {
+        // 离场卡片的底层占位始终不透明，交接时由真实卡片在同一位置接替。
+        // 右滑时占住上一张原来的槽位，避免只有两三张卡片时底层突然露空。
+        if (moving && (dragX < 0f || size <= 3)) {
+            val backingSubject = if (dragX < 0f) displayed.first() else displayed.last()
             StackCard(
-                subject = ordered.last(),
-                index = 0,
+                subject = backingSubject,
                 expansion = 0f,
                 listY = 0.dp,
-                stackSlot = STACK_SLOTS[0],
+                stackSlot = stackSlot(size - 1),
                 sharedTiltState = sharedTiltState,
                 onNavigate = onNavigate,
                 setTopbarTitle = setTopbarTitle,
                 onLongPress = {},
                 interactive = false,
-                cardModifier = Modifier.zIndex(200f),
-                extraTranslationX = -screenWidthPx + dragX.value
+                cardModifier = Modifier.clearAndSetSemantics {},
+                zIndex = 0f
             )
+        }
+
+        displayed.forEachIndexed { index, subject ->
+            val placement = stackCardPlacement(
+                index, size, if (moving) dragX else 0f, screenWidthPx, settleProgress
+            )
+            if (placement.visible || expansion.value != 0f) {
+                key(subject.subject.id) {
+                    val isTop = index == 0 && !expanded
+                    val isIncoming = moving &&
+                        ((dragX > 0f && index == size - 1) || (dragX < 0f && index == 1))
+                    StackCard(
+                        subject = subject,
+                        expansion = expansion.value,
+                        listY = (cardHeight + gap) * index,
+                        stackSlot = placement.slot,
+                        sharedTiltState = sharedTiltState,
+                        onNavigate = onNavigate,
+                        setTopbarTitle = setTopbarTitle,
+                        onLongPress = { onLongPress(subject) },
+                        interactive = !isSettling && (expanded || index == 0),
+                        cardModifier = if (isTop && canSwitch) {
+                            Modifier.draggable(
+                                state = dragState,
+                                orientation = Orientation.Horizontal,
+                                enabled = !isSettling && expansion.value == 0f,
+                                onDragStarted = {
+                                    swipeOrder = ordered
+                                },
+                                onDragStopped = { finishDrag() }
+                            )
+                        } else {
+                            Modifier
+                        },
+                        extraTranslationX = placement.translationX,
+                        zIndex = placement.zIndex,
+                        overlay = {
+                            if (canSwitch && (index == 0 || isIncoming)) {
+                                Box(
+                                    modifier = Modifier
+                                        .align(Alignment.BottomCenter)
+                                        .fillMaxWidth()
+                                        .height(24.dp)
+                                        .clickable(
+                                            enabled = !isSettling && dragX == 0f,
+                                            interactionSource = remember { MutableInteractionSource() },
+                                            indication = null
+                                        ) {
+                                            onExpandChange(!expanded)
+                                        },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        painter = painterResource(
+                                            if (expanded) R.drawable.arrow_up_line else R.drawable.arrow_down_line
+                                        ),
+                                        contentDescription = if (expanded) "收起科目" else "展开所有科目",
+                                        tint = colorResource(R.color.icon),
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                            }
+                        }
+                    )
+                }
+            }
         }
     }
 }
@@ -552,7 +632,6 @@ private fun SubjectStack(
 @Composable
 private fun StackCard(
     subject: SubjectWithTodayCount,
-    index: Int,
     expansion: Float,
     listY: Dp,
     stackSlot: StackSlot,
@@ -561,43 +640,15 @@ private fun StackCard(
     setTopbarTitle: (String) -> Unit,
     onLongPress: () -> Unit,
     interactive: Boolean,
-    instantSlot: Boolean = false,
     cardModifier: Modifier = Modifier,
     extraTranslationX: Float = 0f,
-    alphaMultiplier: Float = 1f,
+    zIndex: Float,
     overlay: @Composable BoxScope.() -> Unit = {}
 ) {
-    val animatedScale by animateFloatAsState(
-        targetValue = stackSlot.scale,
-        animationSpec = StackSpring,
-        label = "cardScale"
-    )
-    val animatedX by animateDpAsState(
-        targetValue = stackSlot.x,
-        animationSpec = spring(dampingRatio = 0.85f, stiffness = 350f),
-        label = "cardX"
-    )
-    val animatedY by animateDpAsState(
-        targetValue = stackSlot.y,
-        animationSpec = spring(dampingRatio = 0.85f, stiffness = 350f),
-        label = "cardY"
-    )
-
     val e = expansion
-    // instantSlot：直接使用槽位目标值，避免切换瞬间播放“从前往后”的位移
-    val baseScale = if (instantSlot) stackSlot.scale else animatedScale
-    val baseX = if (instantSlot) stackSlot.x else animatedX
-    val baseY = if (instantSlot) stackSlot.y else animatedY
-    val scale = baseScale + (1f - baseScale) * e
-    val x = baseX + (0.dp - baseX) * e
-    val y = baseY + (listY - baseY) * e
-    // 前三层始终可见；第 4 张起从“第三层缩略”状态淡入（层位变化时也做淡入淡出）
-    val animatedBaseAlpha by animateFloatAsState(
-        targetValue = if (index < 3) 1f else 0f,
-        animationSpec = StackSpring,
-        label = "baseAlpha"
-    )
-    val alpha = (animatedBaseAlpha + (1f - animatedBaseAlpha) * e) * alphaMultiplier
+    val scale = stackSlot.scale + (1f - stackSlot.scale) * e
+    val x = stackSlot.x * (1f - e)
+    val y = stackSlot.y + (listY - stackSlot.y) * e
 
     Box(
         modifier = Modifier
@@ -608,10 +659,9 @@ private fun StackCard(
                 transformOrigin = TransformOrigin(0f, 0f)
                 scaleX = scale
                 scaleY = scale
-                this.alpha = alpha
                 translationX = extraTranslationX
             }
-            .zIndex((100 - index).toFloat())
+            .zIndex(zIndex)
             .then(cardModifier)
     ) {
         SubjectCard(

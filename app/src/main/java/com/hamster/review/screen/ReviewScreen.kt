@@ -71,6 +71,7 @@ import com.hamster.review.compose.InquiryDialog
 import com.hamster.review.compose.ItemGroup
 import com.hamster.review.compose.PageColumn
 import com.hamster.review.compose.SharedTiltState
+import com.hamster.review.compose.WrappingLatex
 import com.hamster.review.compose.rememberSharedTiltState
 import com.hamster.review.data.db.QuestionDetail
 import com.hamster.review.data.db.QuestionOptionEntity
@@ -294,7 +295,6 @@ private fun ColumnScope.ReviewQuestionSection(
         onEditingChange(false)
     }
 
-    // 顶部单独卡片：题型 / 答题结果 + 功能按钮
     ItemGroup(
         titleState = titleState,
         contentModifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
@@ -395,7 +395,8 @@ private fun ColumnScope.ReviewQuestionSection(
                         MarkdownContent(
                             modifier = Modifier.padding(8.dp),
                             content = if (isEditing) editContent else question.question.content,
-                            fontSize = 20.sp
+                            fontSize = 20.sp,
+                            wrapLatex = true
                         )
                     }
                 }
@@ -423,7 +424,8 @@ private fun ColumnScope.ReviewQuestionSection(
                                 MarkdownContent(
                                     modifier = Modifier.padding(vertical = 4.dp),
                                     content = if (isEditing) editAnswer else question.question.answer.orEmpty(),
-                                    fontSize = 18.sp
+                                    fontSize = 18.sp,
+                                    wrapLatex = true
                                 )
                             }
                         }
@@ -802,14 +804,13 @@ private fun optionBackground(
     }
 }
 
-
-/**
- * 逐行渲染 Markdown：
- * 每个 '\n' 都真实产生一次换行（不再依赖解析器的软/硬换行），空行占一整行高度。
- * 围栏代码块(```math / ```latex / ```)会整体保留，公式内部换行不受影响。
- */
 @Composable
-private fun MarkdownContent(modifier: Modifier = Modifier, content: String, fontSize: TextUnit = 12.sp) {
+private fun MarkdownContent(
+    modifier: Modifier = Modifier,
+    content: String,
+    fontSize: TextUnit = 12.sp,
+    wrapLatex: Boolean = true
+) {
     val blocks = remember(content) { splitMarkdownBlocks(content) }
     val blankLineHeight = with(LocalDensity.current) { (fontSize.toPx() * 1.5f).toDp() }
 
@@ -819,7 +820,7 @@ private fun MarkdownContent(modifier: Modifier = Modifier, content: String, font
                 // 空行也占一整行，保证 '\n' 与换行严格 1:1
                 Spacer(modifier = Modifier.height(blankLineHeight))
             } else {
-                MarkdownBlock(content = block, fontSize = fontSize)
+                MarkdownBlock(content = block, fontSize = fontSize, wrapLatex = wrapLatex)
             }
         }
     }
@@ -827,9 +828,10 @@ private fun MarkdownContent(modifier: Modifier = Modifier, content: String, font
 
 /** 单个 Markdown 块：一行文本，或一个完整的围栏代码块。 */
 @Composable
-private fun MarkdownBlock(content: String, fontSize: TextUnit) {
+private fun MarkdownBlock(content: String, fontSize: TextUnit, wrapLatex: Boolean) {
     Markdown(
         content = content,
+        modifier = Modifier.fillMaxWidth(),
         components = markdownComponents(
             codeFence = { model ->
                 val blockText = model.node.getTextInNode(model.content).toString()
@@ -840,7 +842,11 @@ private fun MarkdownBlock(content: String, fontSize: TextUnit) {
                         .removeSuffix("```")
                         .trim()
 
-                    Latex(latex = formula)
+                    if (wrapLatex) {
+                        WrappingLatex(latex = formula, fontSize = fontSize)
+                    } else {
+                        Latex(latex = formula)
+                    }
                 } else {
                     Text(
                         text = blockText,
