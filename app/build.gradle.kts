@@ -17,8 +17,8 @@ android {
         applicationId = "com.hamster.review"
         minSdk = 34
         targetSdk = 37
-        versionCode = 100003
-        versionName = "1.0.3"
+        versionCode = 100005
+        versionName = "1.0.5"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

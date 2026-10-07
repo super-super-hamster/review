@@ -495,13 +495,22 @@ class ReviewViewModel(
         }
         val completed = isCorrect && (!wasWrongBefore || newStreak >= REQUIRED_CORRECT_STREAK)
 
+        // 错题「3 连对」补答：前两次答对不写调度、不写日志（刚看过答案，不能代表真实复习）；
+        // 第 3 次达标时按 GOOD 结算一次（忽略耗时）。答错仍照常按 AGAIN 记录。
+        val isStreakRetryWithoutSettlement =
+            wasWrongBefore && isCorrect && newStreak < REQUIRED_CORRECT_STREAK
+        val ignoreResponseTime = wasWrongBefore
+
         viewModelScope.launch {
             withContext(NonCancellable) {
-                repository.submitAnswer(
-                    questionId = questionId,
-                    isCorrect = isCorrect,
-                    responseTimeMs = responseTime
-                )
+                if (!isStreakRetryWithoutSettlement) {
+                    repository.submitAnswer(
+                        questionId = questionId,
+                        isCorrect = isCorrect,
+                        responseTimeMs = responseTime,
+                        ignoreResponseTime = ignoreResponseTime
+                    )
+                }
                 if (completed) {
                     repository.markDailyQuestionCompleted(subjectId, questionId)
                     if (completedInSession.add(questionId)) {

@@ -28,7 +28,9 @@ import java.net.URL
 import java.security.MessageDigest
 import java.time.LocalDate
 import java.time.ZoneId
+import kotlin.math.ceil
 import kotlin.math.min
+import kotlin.random.Random
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
@@ -46,6 +48,9 @@ private const val QUESTION_BANK_PREFS = "official_bank"
 private const val QUESTION_BANK_VERSION_KEY = "version"
 private const val QUESTION_BANK_SHA_KEY = "sha256"
 
+/** 每天为新题保留的配额比例（占当天目标的 30%，向上取整，至少 1 道）。 */
+private const val NEW_QUESTION_QUOTA_RATIO = 0.3
+
 class ReviewRepository(
     private val db: AppDatabase
 ) {
@@ -59,12 +64,12 @@ class ReviewRepository(
     private val dailySubjectRecordDao = db.dailySubjectRecordDao()
     private val dailySubjectQuestionDao = db.dailySubjectQuestionDao()
 
+    /**
+     * 首页科目进度。时间(当前日期/到期判定)由 SQL 在查询当刻实时取值，
+     * 避免"建流时冻结时间"导致题库更新后新题被判定为未到期而显示假进度。
+     */
     fun observeSubjectsWithTodayCount(): Flow<List<SubjectWithTodayCount>> {
-        val today = LocalDate.now().toString()
-        return subjectDao.observeSubjectsWithTodayCount(
-            now = System.currentTimeMillis(),
-            today = today
-        )
+        return subjectDao.observeSubjectsWithTodayCount()
     }
 
     /**
@@ -166,15 +171,46 @@ class ReviewRepository(
     }
 
     /**
-     * 确保今天（date）的题目池已生成。
-     * 仅在当天还没有任何推送行且未标记完成时执行：
+     * 确保今天的题目池已生成（幂等，可在首页/进入科目/题库更新后随时调用）。
+     *
+     * 以"当天推送行"为准：
+     * - 已有推送行 → 沿用，并用行数校正当天记录（题库更新可能级联删掉部分行）；
+     * - 没有推送行 → 视为今天还没开始，**即使记录被标记完成也重建**当天池
+     *   （避免"记录说已完成、行已被删除"导致首页假进度且无法恢复）。
+     *
      * 数量 = min(dailyLimit, 未掌握题数)，优先到期题，不足补新题（不做重复推送）。
      */
     suspend fun prepareTodayPool(subjectId: Long) {
         val today = LocalDate.now().toString()
-        if (dailySubjectQuestionDao.getForDate(subjectId, today).isNotEmpty()) return
+        val rows = dailySubjectQuestionDao.getForDate(subjectId, today)
         val record = dailySubjectRecordDao.get(subjectId, today)
-        if (record?.completed == true) return
+
+        if (rows.isNotEmpty()) {
+            // 最小校正：用当天推送行重算记录的 推送数/完成数/完成标志
+            val completedCount = rows.count { it.completed }
+            val allCompleted = completedCount >= rows.size
+            if (record == null ||
+                record.pushedCount != rows.size ||
+                record.completedCount != completedCount ||
+                record.completed != allCompleted
+            ) {
+                dailySubjectRecordDao.upsert(
+                    DailySubjectRecordEntity(
+                        subjectId = subjectId,
+                        date = today,
+                        pushedCount = rows.size,
+                        completedCount = completedCount,
+                        completed = allCompleted,
+                        completedAt = if (allCompleted) {
+                            record?.completedAt ?: System.currentTimeMillis()
+                        } else {
+                            null
+                        }
+                    )
+                )
+            }
+            return
+        }
 
         val limit = subjectDao.getDailyLimit(subjectId)
         val target = min(limit, questionDao.countUnmastered(subjectId))
@@ -210,7 +246,14 @@ class ReviewRepository(
     }
 
     /**
-     * 按「到期题 -> 新题」的顺序挑选 [limit] 道未掌握、且不在 [excludeQuestionIds] 中的题。
+     * 挑选 [limit] 道未掌握、且不在 [excludeQuestionIds] 中的题：
+     *
+     * 1. **新题配额**：为新题保留 [NEW_QUESTION_QUOTA_RATIO]（30%，向上取整）的名额，
+     *    避免到期题积压把名额占满导致新题刷不到；存在到期题时保证至少 1 道到期题；
+     * 2. **到期题分档**：按超期天数分四档（≤1 天 / 1–3 天 / 3–7 天 / >7 天），
+     *    档间"超期越久越优先"，**档内随机**（种子 = 科目 + 当天日期，同一天同科目结果稳定）；
+     * 3. 新题整体视作同一优先级，组内同样随机；
+     * 4. 到期题在前、新题在后；任一侧不足时用另一侧补满 [limit]。
      */
     private suspend fun selectPoolQuestions(
         subjectId: Long,
@@ -219,13 +262,48 @@ class ReviewRepository(
     ): List<QuestionDetail> {
         if (limit <= 0) return emptyList()
         val now = System.currentTimeMillis()
-        val seen = HashSet<Long>()
-        seen.addAll(excludeQuestionIds)
+        val random = Random(subjectId * 1_000_003L + LocalDate.now().toEpochDay())
+
         val due = questionDao.getDuePoolQuestions(subjectId, now)
+            .filterNot { it.question.id in excludeQuestionIds }
         val newQuestions = questionDao.getNewPoolQuestions(subjectId)
-        return (due + newQuestions)
-            .filter { seen.add(it.question.id) }
-            .take(limit)
+            .filterNot { it.question.id in excludeQuestionIds }
+
+        val dueDateById = schedulerDao.getStatesForSubject(subjectId)
+            .associate { it.questionId to it.dueDate }
+
+        // 档内随机、档间保持"超期越久越优先"
+        val tieredDue = due
+            .groupBy { overdueTier(now, dueDateById[it.question.id] ?: now) }
+            .let { groups ->
+                (3 downTo 0).flatMap { tier -> groups[tier].orEmpty().shuffled(random) }
+            }
+        val shuffledNew = newQuestions.shuffled(random)
+
+        // 新题配额：30% 向上取整，且不超过可用新题数
+        var newQuota = ceil(limit * NEW_QUESTION_QUOTA_RATIO).toInt().coerceAtLeast(1)
+        if (tieredDue.isNotEmpty()) newQuota = min(newQuota, limit - 1)
+        newQuota = min(newQuota, shuffledNew.size)
+        val dueQuota = (limit - newQuota).coerceAtLeast(0)
+
+        val picked = ArrayList<QuestionDetail>(limit)
+        picked.addAll(tieredDue.take(dueQuota))
+        picked.addAll(shuffledNew.take(limit - picked.size))
+        if (picked.size < limit) {
+            picked.addAll(tieredDue.drop(dueQuota).take(limit - picked.size))
+        }
+        return picked
+    }
+
+    /** 到期题分档：0 = 超期 ≤1 天，1 = 1–3 天，2 = 3–7 天，3 = >7 天。 */
+    private fun overdueTier(now: Long, dueDate: Long): Int {
+        val overdueDays = (now - dueDate).toDouble() / (24.0 * 60.0 * 60.0 * 1000.0)
+        return when {
+            overdueDays <= 1.0 -> 0
+            overdueDays <= 3.0 -> 1
+            overdueDays <= 7.0 -> 2
+            else -> 3
+        }
     }
 
     suspend fun getSubjectDailyQuestions(subjectId: Long): List<DailySubjectQuestionEntity> {
@@ -323,17 +401,19 @@ class ReviewRepository(
         )
     }
 
+    /**
+     * 标记当天该科目已完成。
+     * 当天没有推送过任何题目（无记录或 pushedCount = 0）时不写记录，
+     * 避免产生"0 题已完成"的假记录把首页显示成 target/target。
+     */
     suspend fun markSubjectCompleted(subjectId: Long) {
         val today = LocalDate.now().toString()
-        val existing = dailySubjectRecordDao.get(subjectId, today)
+        val existing = dailySubjectRecordDao.get(subjectId, today) ?: return
+        if (existing.pushedCount <= 0) return
         dailySubjectRecordDao.upsert(
-            DailySubjectRecordEntity(
-                subjectId = subjectId,
-                date = today,
-                pushedCount = existing?.pushedCount ?: 0,
-                completedCount = existing?.completedCount ?: existing?.pushedCount ?: 0,
+            existing.copy(
                 completed = true,
-                completedAt = System.currentTimeMillis()
+                completedAt = existing.completedAt ?: System.currentTimeMillis()
             )
         )
     }
@@ -465,20 +545,33 @@ class ReviewRepository(
         reviewLogDao.deleteOlderThan(cutoff)
     }
 
+    /**
+     * 提交一次作答。
+     *
+     * @param ignoreResponseTime 为 true 时不参考答题耗时：答对固定判 GOOD（答错仍 AGAIN）。
+     *   用于错题的"3 连对补答/结算"——此时用户刚看过答案，耗时不能代表真实熟练度。
+     */
     suspend fun submitAnswer(
         questionId: Long,
         isCorrect: Boolean,
-        responseTimeMs: Long
+        responseTimeMs: Long,
+        ignoreResponseTime: Boolean = false
     ): Result<Unit> = runCatching {
         val question = questionDao.getQuestionDetail(questionId)?.question
             ?: error("Question not found: $questionId")
 
-        val baseline = calculateBaseline(
-            questionId = questionId,
-            subjectId = question.subjectId,
-            type = question.type
-        )
-        val rating = mapToRating(isCorrect, responseTimeMs, baseline)
+        val rating = when {
+            !isCorrect -> FsrsRating.AGAIN
+            ignoreResponseTime -> FsrsRating.GOOD
+            else -> {
+                val baseline = calculateBaseline(
+                    questionId = questionId,
+                    subjectId = question.subjectId,
+                    type = question.type
+                )
+                mapToRating(isCorrect, responseTimeMs, baseline)
+            }
+        }
 
         db.withTransaction {
             val oldState = schedulerDao.getSchedulerState(questionId)

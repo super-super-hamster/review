@@ -15,6 +15,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -34,7 +35,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             repository.seedIfEmpty()
             repository.cleanupOldReviewLogs()
+            ensureTodayPools()
         }
+    }
+
+    /**
+     * 为所有科目幂等生成"当天题目池"，让首页进度使用 pushed/completed 的真实口径
+     * （否则未推送时会用"到期题数"估算，出现隔天进度残留、题库更新后假进度等问题）。
+     */
+    private suspend fun ensureTodayPools() {
+        val list = repository.observeSubjectsWithTodayCount().first()
+        list.forEach { repository.prepareTodayPool(it.subject.id) }
     }
 
     fun setSubjectDailyLimit(subjectId: Long, dailyLimit: Int) {
@@ -83,6 +94,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 }
                 Toast.makeText(getApplication(), message, Toast.LENGTH_LONG).show()
+                // 题库可能新增了科目/题目：重新幂等生成当天池，保证首页进度口径正确
+                if (message.startsWith("题库更新成功")) {
+                    ensureTodayPools()
+                }
             } catch (e: CancellationException) {
                 Toast.makeText(getApplication(), "已取消题库更新", Toast.LENGTH_SHORT).show()
                 throw e

@@ -22,17 +22,17 @@ interface SubjectDao {
                    WHEN EXISTS(
                        SELECT 1 FROM daily_subject_records d
                        WHERE d.subjectId = subjects.id
-                         AND d.date = :today
+                         AND d.date = date('now','localtime')
                          AND d.completed = 1
                    ) THEN 0
                    WHEN EXISTS(
                        SELECT 1 FROM daily_subject_records d
                        WHERE d.subjectId = subjects.id
-                         AND d.date = :today
+                         AND d.date = date('now','localtime')
                    ) THEN MAX(0, (
                        SELECT pushedCount - completedCount
                        FROM daily_subject_records
-                       WHERE subjectId = subjects.id AND date = :today
+                       WHERE subjectId = subjects.id AND date = date('now','localtime')
                    ))
                    ELSE MIN((
                        SELECT COUNT(*)
@@ -40,17 +40,14 @@ interface SubjectDao {
                        INNER JOIN questions q ON q.id = s.questionId
                        WHERE q.subjectId = subjects.id
                          AND q.mastered = 0
-                         AND s.dueDate <= :now
+                         AND s.dueDate <= CAST(strftime('%s','now') AS INTEGER) * 1000
                    ), subjects.dailyLimit)
                END AS todayCount
         FROM subjects
         ORDER BY subjects.sortOrder ASC, subjects.id ASC
         """
     )
-    fun observeSubjectsWithTodayCount(
-        now: Long,
-        today: String
-    ): Flow<List<SubjectWithTodayCount>>
+    fun observeSubjectsWithTodayCount(): Flow<List<SubjectWithTodayCount>>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAll(subjects: List<SubjectEntity>): List<Long>
@@ -176,10 +173,16 @@ interface QuestionDao {
     )
 
 
+    /**
+     * 答题耗时基准语料：只统计"答对"的记录，且**排除曾答错过的题（错题）的所有记录**
+     * （错题刚看过答案，耗时不能代表真实熟练度）。
+     */
     @Query(
         """
         SELECT responseTimeMs FROM review_logs
         WHERE questionId = :questionId
+          AND isCorrect = 1
+          AND questionId NOT IN (SELECT questionId FROM review_logs WHERE isCorrect = 0)
         ORDER BY reviewedAt DESC
         LIMIT 20
         """
@@ -190,8 +193,10 @@ interface QuestionDao {
         """
         SELECT responseTimeMs FROM review_logs
         WHERE subjectId = :subjectId
+          AND isCorrect = 1
+          AND questionId NOT IN (SELECT questionId FROM review_logs WHERE isCorrect = 0)
         ORDER BY reviewedAt DESC
-        LIMIT 200
+        LIMIT 500
         """
     )
     suspend fun getSubjectResponseTimes(subjectId: Long): List<Long>
@@ -202,8 +207,10 @@ interface QuestionDao {
         WHERE questionId IN (
             SELECT id FROM questions WHERE type = :type
         )
+          AND isCorrect = 1
+          AND questionId NOT IN (SELECT questionId FROM review_logs WHERE isCorrect = 0)
         ORDER BY reviewedAt DESC
-        LIMIT 200
+        LIMIT 500
         """
     )
     suspend fun getTypeResponseTimes(type: String): List<Long>
@@ -234,6 +241,16 @@ interface SchedulerStateDao {
 
     @Query("SELECT * FROM scheduler_state WHERE questionId = :questionId")
     suspend fun getSchedulerState(questionId: Long): SchedulerStateEntity?
+
+    /** 某科目全部题目的调度状态（用于按"超期档位"给到期题分档）。 */
+    @Query(
+        """
+        SELECT s.* FROM scheduler_state s
+        INNER JOIN questions q ON q.id = s.questionId
+        WHERE q.subjectId = :subjectId
+        """
+    )
+    suspend fun getStatesForSubject(subjectId: Long): List<SchedulerStateEntity>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(state: SchedulerStateEntity)
