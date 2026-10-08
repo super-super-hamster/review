@@ -195,7 +195,6 @@ fun MainScreen(
                 content = "${subject.subject.name}：每日题目数量",
                 value = currentLimit.toFloat(),
                 onValueChange = { newValue ->
-                    // 允许 1，其余保持 10 的步进
                     val stepped = if (newValue < 5.5f) {
                         1
                     } else {
@@ -321,7 +320,6 @@ fun SubjectCard(
     modifier: Modifier = Modifier,
     interactive: Boolean = true
 ) {
-    // 当天目标 = min(每日数量, 未掌握题数)；为 0 时不显示进度与计数
     val dailyTarget = min(dailyLimit, availableCount)
     val remaining = todayCount.coerceIn(0, dailyTarget)
 
@@ -370,7 +368,6 @@ fun SubjectCard(
     }
 }
 
-/** 堆叠槽位参数：近大远小 + 间距递增（非等差），底层不透明。 */
 internal data class StackSlot(val scale: Float, val x: Dp, val y: Dp)
 
 private val STACK_SLOTS = listOf(
@@ -390,7 +387,6 @@ internal data class StackCardPlacement(
 
 private fun stackSlot(index: Int) = STACK_SLOTS[min(index, STACK_SLOTS.lastIndex)]
 
-/** 所有卡片共享一次切换进度，终点与重排后的静态槽位完全一致。 */
 internal fun stackCardPlacement(
     index: Int,
     size: Int,
@@ -488,7 +484,6 @@ private fun SubjectStack(
         isSettling = false
     }
 
-    // 数据成员变化或展开时取消手势；单纯循环重排不打断交接。
     LaunchedEffect(ordered.map { it.subject.id }.toSet(), expanded) {
         settleJob?.cancel()
         resetSwipe()
@@ -528,7 +523,6 @@ private fun SubjectStack(
                 animate(0f, 1f, animationSpec = tween(200)) { value, _ ->
                     settleProgress = value
                 }
-                // 保留动画终态，直到父级确实应用新顺序后再一起清理。
                 pendingTopId = target
                 onSwipeTop(target)
             }
@@ -542,8 +536,6 @@ private fun SubjectStack(
             .fillMaxWidth()
             .height(containerHeight)
     ) {
-        // 离场卡片的底层占位始终不透明，交接时由真实卡片在同一位置接替。
-        // 右滑时占住上一张原来的槽位，避免只有两三张卡片时底层突然露空。
         if (moving && (dragX < 0f || size <= 3)) {
             val backingSubject = if (dragX < 0f) displayed.first() else displayed.last()
             StackCard(
@@ -655,7 +647,6 @@ private fun StackCard(
             .fillMaxWidth()
             .offset(x = x, y = y)
             .graphicsLayer {
-                // 左上锚点缩放，保证右下方向的堆叠偏移可见
                 transformOrigin = TransformOrigin(0f, 0f)
                 scaleX = scale
                 scaleY = scale

@@ -107,7 +107,6 @@ fun ReviewScreen(
     val cardAlpha = remember { Animatable(1f) }
     val coroutineScope = rememberCoroutineScope()
 
-    // 只要停留在 Review 页就显示顶栏环形进度；离开时清除
     LaunchedEffect(todayProgress) {
         setReviewProgress(todayProgress)
     }
@@ -432,7 +431,7 @@ private fun ColumnScope.ReviewQuestionSection(
                     }
                 }
 
-                // 备注（解析）：显示在题面下方
+                // 备注
                 if (state.answered || isEditing) {
                     Spacer(modifier = Modifier.height(8.dp))
                     if (isEditing && editingField == "explanation") {
@@ -442,7 +441,6 @@ private fun ColumnScope.ReviewQuestionSection(
                             modifier = Modifier.fillMaxWidth()
                         )
                     } else {
-                        // 备注用 MarkdownContent 渲染，支持公式块；标签单独一行
                         Column(modifier = Modifier.fillMaxWidth()) {
                             Text(
                                 text = "备注：",
@@ -692,7 +690,6 @@ private fun ActionButtons(
             }
 
             else -> {
-                // 选择题/判断题：未选择任何选项时，按钮透明且不可点击
                 val hasSelection = state.selectedOptionIds.isNotEmpty()
                 Button(
                     modifier = Modifier
@@ -817,7 +814,6 @@ private fun MarkdownContent(
     Column(modifier = modifier) {
         blocks.forEach { block ->
             if (block.isBlank()) {
-                // 空行也占一整行，保证 '\n' 与换行严格 1:1
                 Spacer(modifier = Modifier.height(blankLineHeight))
             } else {
                 MarkdownBlock(content = block, fontSize = fontSize, wrapLatex = wrapLatex)
@@ -826,7 +822,6 @@ private fun MarkdownContent(
     }
 }
 
-/** 单个 Markdown 块：一行文本，或一个完整的围栏代码块。 */
 @Composable
 private fun MarkdownBlock(content: String, fontSize: TextUnit, wrapLatex: Boolean) {
     Markdown(
@@ -880,11 +875,6 @@ private fun MarkdownBlock(content: String, fontSize: TextUnit, wrapLatex: Boolea
     )
 }
 
-/**
- * 按 '\n' 逐行拆分：
- * - 围栏代码块(以 ``` 开头到下一个 ``` 结束)合并为一个整体块；
- * - 其余每个换行都拆成独立块（空行 → 空字符串块）。
- */
 private fun splitMarkdownBlocks(content: String): List<String> {
     val lines = content.split("\n")
     val blocks = mutableListOf<String>()
@@ -1015,7 +1005,6 @@ fun SingleMonthHeatmap(
                             val date = currentMonth.atDay(day)
                             val count = dataMap[date] ?: 0
 
-                            // 保留了你原本根据 count 设定的热力图颜色
                             val bgColor = when {
                                 count <= 0 -> Color(0xFFEBEDF0)
                                 count == 1 -> Color(0xFFC6E48B)
@@ -1038,7 +1027,6 @@ fun SingleMonthHeatmap(
                                 )
                             }
                         } else {
-                            // 空白占位符
                             Spacer(modifier = Modifier.weight(1f))
                         }
                     }

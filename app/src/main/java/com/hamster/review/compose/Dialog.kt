@@ -313,7 +313,6 @@ fun SliderDialog(
             success
         }
     ) {
-        // 当前值实时拼在 content 行尾（拖动时随 value 变化刷新）
         Text(
             text = if (content.isEmpty()) {
                 valueFormatter(value)

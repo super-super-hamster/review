@@ -27,7 +27,6 @@ class ManageQuestionsViewModel(
     var loading by mutableStateOf(true)
         private set
 
-    /** 一次性加载；返回本页时由页面再次调用以刷新（保存后能看到最新内容）。 */
     fun refresh() {
         viewModelScope.launch {
             questions = repository.getSubjectQuestionDetails(subjectId)

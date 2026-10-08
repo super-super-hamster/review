@@ -17,7 +17,6 @@ data class Review(
 data class AddQuestion(
     val subjectId: Long,
     val typeName: String,
-    /** > 0 表示编辑已有题目 */
     val questionId: Long = 0L
 ) : Route
 

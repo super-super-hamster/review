@@ -39,10 +39,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /**
-     * 为所有科目幂等生成"当天题目池"，让首页进度使用 pushed/completed 的真实口径
-     * （否则未推送时会用"到期题数"估算，出现隔天进度残留、题库更新后假进度等问题）。
-     */
     private suspend fun ensureTodayPools() {
         val list = repository.observeSubjectsWithTodayCount().first()
         list.forEach { repository.prepareTodayPool(it.subject.id) }
@@ -66,7 +62,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /** 更新题库进度状态：text=当前操作，progress=0f..1f，cancelable=是否可取消。 */
     data class BankUpdateState(
         val text: String,
         val progress: Float,
@@ -88,13 +83,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         bankUpdateJob = viewModelScope.launch {
             try {
                 val message = repository.updateOfficialBankFromGitHub(getApplication()) { text, progress, cancelable ->
-                    // 进度回调来自 IO 线程，切回主线程更新状态
                     withContext(Dispatchers.Main) {
                         _bankUpdateState = BankUpdateState(text, progress, cancelable)
                     }
                 }
                 Toast.makeText(getApplication(), message, Toast.LENGTH_LONG).show()
-                // 题库可能新增了科目/题目：重新幂等生成当天池，保证首页进度口径正确
                 if (message.startsWith("题库更新成功")) {
                     ensureTodayPools()
                 }
@@ -109,7 +102,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /** 用户取消本次题库更新（下载/校验阶段生效；写入阶段 cancelable=false）。 */
     fun cancelBankUpdate() {
         bankUpdateJob?.cancel()
     }
@@ -123,7 +115,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             _topbarTitle = title
         }
 
-    /** 顶栏环形进度（null = 不显示），仅 ReviewScreen 在栈上时由页面写入。 */
     private var _reviewProgress by mutableStateOf<Float?>(null)
     val reviewProgress: Float?
         get() = _reviewProgress
@@ -132,7 +123,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _reviewProgress = value
     }
 
-    /** 首页科目卡片是否展开为列表（会话内保持）。 */
     private var _homeExpanded by mutableStateOf(false)
     val homeExpanded: Boolean
         get() = _homeExpanded
@@ -141,7 +131,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _homeExpanded = expanded
     }
 
-    /** 首页堆叠模式下当前顶层科目 id（会话内保持）。 */
     private var _homeTopSubjectId by mutableStateOf<Long?>(null)
     val homeTopSubjectId: Long?
         get() = _homeTopSubjectId

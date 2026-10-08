@@ -142,7 +142,6 @@ fun AddQuestionScreen(
         editingIndex = null
         val minSize = if (type == QuestionType.MULTIPLE_CHOICE) 3 else 2
         val rowBlank = options[index].isBlank()
-        // 编辑模式下不允许增删选项（保持与已存选项一一对应）
         if (!isEdit && !isJudge && rowBlank && options.size > minSize) {
             removeOption(index)
             return
@@ -185,7 +184,6 @@ fun AddQuestionScreen(
         }
     }
 
-    /** 编辑模式下判断是否有改动。 */
     fun isDirty(): Boolean {
         val origin = seed ?: return false
         if (content.trim() != origin.content.trim()) return true
@@ -209,7 +207,6 @@ fun AddQuestionScreen(
         }
     }
 
-    // 返回：编辑模式且有改动时先询问是否保存
     fun attemptExit() {
         if (isEdit && isDirty()) {
             showExitDialog = true
@@ -257,7 +254,6 @@ fun AddQuestionScreen(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null
                 ) {
-                    // 点击空白处：结束选项编辑、移除焦点并收起键盘
                     editingIndex = null
                     focusManager.clearFocus()
                     keyboardController?.hide()
@@ -435,7 +431,6 @@ private fun OptionEditRow(
                             wasFocused = it.isFocused
                         }
                         .onPreviewKeyEvent { event ->
-                            // 内容为空时按退格(删除)键删除该选项，与日记编辑器行为一致
                             if (event.type == KeyEventType.KeyDown &&
                                 event.key == Key.Backspace &&
                                 text.isEmpty() &&

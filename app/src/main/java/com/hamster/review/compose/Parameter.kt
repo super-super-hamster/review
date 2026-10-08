@@ -99,7 +99,6 @@ fun Modifier.applySharedTilt(
 
     LaunchedEffect(state.currentGlobalTouch) {
         val touch = state.currentGlobalTouch
-        // 关键判断：全局触摸点是否在这张卡片的全局 Bounds 内
         if (touch != null && myBounds.contains(touch)) {
             val centerX = myBounds.center.x
             val centerY = myBounds.center.y
@@ -118,7 +117,6 @@ fun Modifier.applySharedTilt(
 
     return this
         .onGloballyPositioned { coordinates ->
-            // 获取卡片在整个屏幕上的绝对位置。即使外层有 Scroll 滚动，这个位置也会实时更新！
             myBounds = coordinates.boundsInRoot()
         }
         .graphicsLayer {

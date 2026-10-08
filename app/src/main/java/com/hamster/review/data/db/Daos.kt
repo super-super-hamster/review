@@ -154,7 +154,6 @@ interface QuestionDao {
     @Query("SELECT * FROM questions WHERE officialId IS NOT NULL")
     suspend fun getAllOfficial(): List<QuestionEntity>
 
-    /** 完整覆盖官方题目字段(不含 id/mastered/调度/日志)。type 传题型枚举名。 */
     @Query(
         """
         UPDATE questions
@@ -172,11 +171,6 @@ interface QuestionDao {
         explanation: String
     )
 
-
-    /**
-     * 答题耗时基准语料：只统计"答对"的记录，且**排除曾答错过的题（错题）的所有记录**
-     * （错题刚看过答案，耗时不能代表真实熟练度）。
-     */
     @Query(
         """
         SELECT responseTimeMs FROM review_logs
@@ -242,7 +236,6 @@ interface SchedulerStateDao {
     @Query("SELECT * FROM scheduler_state WHERE questionId = :questionId")
     suspend fun getSchedulerState(questionId: Long): SchedulerStateEntity?
 
-    /** 某科目全部题目的调度状态（用于按"超期档位"给到期题分档）。 */
     @Query(
         """
         SELECT s.* FROM scheduler_state s

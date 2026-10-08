@@ -35,7 +35,6 @@ fun ManageQuestionsScreen(
     setTopbarTitle("管理题目")
     BackHandler { onBack() }
 
-    // 一次性加载：每次进入本页（含从编辑页返回）都会刷新
     LaunchedEffect(Unit) {
         viewModel.refresh()
     }

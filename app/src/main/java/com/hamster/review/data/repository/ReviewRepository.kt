@@ -48,7 +48,6 @@ private const val QUESTION_BANK_PREFS = "official_bank"
 private const val QUESTION_BANK_VERSION_KEY = "version"
 private const val QUESTION_BANK_SHA_KEY = "sha256"
 
-/** 每天为新题保留的配额比例（占当天目标的 30%，向上取整，至少 1 道）。 */
 private const val NEW_QUESTION_QUOTA_RATIO = 0.3
 
 class ReviewRepository(
@@ -64,18 +63,10 @@ class ReviewRepository(
     private val dailySubjectRecordDao = db.dailySubjectRecordDao()
     private val dailySubjectQuestionDao = db.dailySubjectQuestionDao()
 
-    /**
-     * 首页科目进度。时间(当前日期/到期判定)由 SQL 在查询当刻实时取值，
-     * 避免"建流时冻结时间"导致题库更新后新题被判定为未到期而显示假进度。
-     */
     fun observeSubjectsWithTodayCount(): Flow<List<SubjectWithTodayCount>> {
         return subjectDao.observeSubjectsWithTodayCount()
     }
 
-    /**
-     * 新增科目：名称会去除首尾空白，空白名或重名返回 false。
-     * 新科目排到所有科目之后，每日题目数量使用默认值。
-     */
     suspend fun addSubject(name: String): Boolean {
         val trimmedName = name.trim()
         if (trimmedName.isEmpty() || subjectDao.countByName(trimmedName) > 0) {
@@ -94,19 +85,12 @@ class ReviewRepository(
         return true
     }
 
-    /**
-     * 删除科目（其下的题目、错题/复习状态、当日本地记录等通过外键级联删除）。
-     */
     suspend fun deleteSubject(subjectId: Long) {
         db.withTransaction {
             subjectDao.deleteById(subjectId)
         }
     }
 
-    /**
-     * 新增用户自建题目：插入题目与选项，并为新题建立 NEW 调度状态(使其进入每日补新题池)。
-     * @return 新题目 id
-     */
     suspend fun addQuestion(
         subjectId: Long,
         type: QuestionType,
@@ -170,23 +154,12 @@ class ReviewRepository(
         return dailySubjectRecordDao.get(subjectId, today)?.completed == true
     }
 
-    /**
-     * 确保今天的题目池已生成（幂等，可在首页/进入科目/题库更新后随时调用）。
-     *
-     * 以"当天推送行"为准：
-     * - 已有推送行 → 沿用，并用行数校正当天记录（题库更新可能级联删掉部分行）；
-     * - 没有推送行 → 视为今天还没开始，**即使记录被标记完成也重建**当天池
-     *   （避免"记录说已完成、行已被删除"导致首页假进度且无法恢复）。
-     *
-     * 数量 = min(dailyLimit, 未掌握题数)，优先到期题，不足补新题（不做重复推送）。
-     */
     suspend fun prepareTodayPool(subjectId: Long) {
         val today = LocalDate.now().toString()
         val rows = dailySubjectQuestionDao.getForDate(subjectId, today)
         val record = dailySubjectRecordDao.get(subjectId, today)
 
         if (rows.isNotEmpty()) {
-            // 最小校正：用当天推送行重算记录的 推送数/完成数/完成标志
             val completedCount = rows.count { it.completed }
             val allCompleted = completedCount >= rows.size
             if (record == null ||
@@ -245,16 +218,6 @@ class ReviewRepository(
         }
     }
 
-    /**
-     * 挑选 [limit] 道未掌握、且不在 [excludeQuestionIds] 中的题：
-     *
-     * 1. **新题配额**：为新题保留 [NEW_QUESTION_QUOTA_RATIO]（30%，向上取整）的名额，
-     *    避免到期题积压把名额占满导致新题刷不到；存在到期题时保证至少 1 道到期题；
-     * 2. **到期题分档**：按超期天数分四档（≤1 天 / 1–3 天 / 3–7 天 / >7 天），
-     *    档间"超期越久越优先"，**档内随机**（种子 = 科目 + 当天日期，同一天同科目结果稳定）；
-     * 3. 新题整体视作同一优先级，组内同样随机；
-     * 4. 到期题在前、新题在后；任一侧不足时用另一侧补满 [limit]。
-     */
     private suspend fun selectPoolQuestions(
         subjectId: Long,
         limit: Int,
@@ -272,7 +235,6 @@ class ReviewRepository(
         val dueDateById = schedulerDao.getStatesForSubject(subjectId)
             .associate { it.questionId to it.dueDate }
 
-        // 档内随机、档间保持"超期越久越优先"
         val tieredDue = due
             .groupBy { overdueTier(now, dueDateById[it.question.id] ?: now) }
             .let { groups ->
@@ -280,7 +242,6 @@ class ReviewRepository(
             }
         val shuffledNew = newQuestions.shuffled(random)
 
-        // 新题配额：30% 向上取整，且不超过可用新题数
         var newQuota = ceil(limit * NEW_QUESTION_QUOTA_RATIO).toInt().coerceAtLeast(1)
         if (tieredDue.isNotEmpty()) newQuota = min(newQuota, limit - 1)
         newQuota = min(newQuota, shuffledNew.size)
@@ -295,7 +256,6 @@ class ReviewRepository(
         return picked
     }
 
-    /** 到期题分档：0 = 超期 ≤1 天，1 = 1–3 天，2 = 3–7 天，3 = >7 天。 */
     private fun overdueTier(now: Long, dueDate: Long): Int {
         val overdueDays = (now - dueDate).toDouble() / (24.0 * 60.0 * 60.0 * 1000.0)
         return when {
@@ -316,7 +276,6 @@ class ReviewRepository(
         val today = LocalDate.now().toString()
         val record = dailySubjectRecordDao.get(subjectId, today)
         if (record == null) {
-            // 当天还没开始过，按首次进入生成一组
             prepareTodayPool(subjectId)
             return dailySubjectQuestionDao.getForDate(subjectId, today).count { !it.completed }
         }
@@ -355,7 +314,6 @@ class ReviewRepository(
         return extra.size
     }
 
-    /** 当天是否还有没刷过的可推候选（到期题/新题且未掌握）。 */
     suspend fun hasMorePoolCandidates(subjectId: Long): Boolean {
         val today = LocalDate.now().toString()
         return questionDao.countPoolCandidates(subjectId, today, System.currentTimeMillis()) > 0
@@ -401,11 +359,6 @@ class ReviewRepository(
         )
     }
 
-    /**
-     * 标记当天该科目已完成。
-     * 当天没有推送过任何题目（无记录或 pushedCount = 0）时不写记录，
-     * 避免产生"0 题已完成"的假记录把首页显示成 target/target。
-     */
     suspend fun markSubjectCompleted(subjectId: Long) {
         val today = LocalDate.now().toString()
         val existing = dailySubjectRecordDao.get(subjectId, today) ?: return
@@ -421,7 +374,6 @@ class ReviewRepository(
     suspend fun setSubjectDailyLimit(subjectId: Long, newLimit: Int) {
         val today = LocalDate.now().toString()
 
-        // 今天还没生成过题目池：只更新每日数量，下次进入时按新数量生成
         val record = dailySubjectRecordDao.get(subjectId, today) ?: run {
             subjectDao.updateDailyLimit(subjectId, newLimit)
             return
@@ -434,7 +386,6 @@ class ReviewRepository(
 
         val completedCount = rows.count { it.completed }
         val pendingRows = rows.filterNot { it.completed }
-        // 重新计算当天队列：剩余待完成数 = 新数量 - 已完成数
         val targetPending = (newLimit - completedCount).coerceAtLeast(0)
         val surplus = pendingRows.size - targetPending
 
@@ -445,7 +396,6 @@ class ReviewRepository(
             emptyList()
         }
         val extra = if (surplus < 0) {
-            // 数量调大：从 到期/新题 补足，已推过的当天不再重复推
             selectPoolQuestions(
                 subjectId,
                 limit = -surplus,
@@ -525,17 +475,14 @@ class ReviewRepository(
         return questionDao.getQuestionDetailsByIds(ids)
     }
 
-    /** 取某科目全部已掌握题目（用于"已掌握题目测试"，随机顺序由调用方决定）。 */
     suspend fun getMasteredQuestionsOnce(subjectId: Long): List<QuestionDetail> {
         return questionDao.getMasteredQuestionDetails(subjectId)
     }
 
-    /** 取某科目全部题目（含选项/标签），用于"管理题目"列表，按 id 升序。 */
     suspend fun getSubjectQuestionDetails(subjectId: Long): List<QuestionDetail> {
         return questionDao.getSubjectQuestionDetails(subjectId)
     }
 
-    /** 取单道题目（含选项/标签），用于编辑页初始化。 */
     suspend fun getQuestionDetailOnce(questionId: Long): QuestionDetail? {
         return questionDao.getQuestionDetail(questionId)
     }
@@ -545,12 +492,6 @@ class ReviewRepository(
         reviewLogDao.deleteOlderThan(cutoff)
     }
 
-    /**
-     * 提交一次作答。
-     *
-     * @param ignoreResponseTime 为 true 时不参考答题耗时：答对固定判 GOOD（答错仍 AGAIN）。
-     *   用于错题的"3 连对补答/结算"——此时用户刚看过答案，耗时不能代表真实熟练度。
-     */
     suspend fun submitAnswer(
         questionId: Long,
         isCorrect: Boolean,
@@ -603,11 +544,6 @@ class ReviewRepository(
         questionDao.updateMastered(questionId, mastered, now)
     }
 
-    /**
-     * Fallback seeder used when the prebuilt asset .db is not present.
-     * Once a real default_questions.db is packaged, this method becomes a no-op
-     * because subjects already exist.
-     */
     suspend fun seedIfEmpty() {
         if (subjectDao.count() > 0) return
 
@@ -812,15 +748,6 @@ class ReviewRepository(
         )
     }
 
-    // ---------------- 官方题库同步 ----------------
-
-    /**
-     * 从 GitHub Release 更新官方题库，并把官方题合并进本地库。
-     *
-     * @param onProgress 进度回调：(当前操作文本, 进度 0f..1f, 是否允许取消)
-     *                   写入本地库的事务阶段 cancelable = false。
-     * @return 结果文本（成功 / 已是最新 / 更新失败原因）
-     */
     suspend fun updateOfficialBankFromGitHub(
         context: Context,
         onProgress: suspend (text: String, progress: Float, cancelable: Boolean) -> Unit = { _, _, _ -> }
@@ -852,7 +779,6 @@ class ReviewRepository(
             return "题库已是最新版本"
         }
 
-        // 下载阶段(10% -> 70%)：按已下载字节平滑推进，每块检查取消
         onProgress("正在下载题库 0%", 0.10f, true)
         val bytes = fetchBytes("$QUESTION_BANK_RELEASE_BASE/$fileName") { downloaded, total ->
             val ratio = if (total > 0) (downloaded.toDouble() / total).toFloat() else 0f
@@ -870,7 +796,6 @@ class ReviewRepository(
             onProgress("正在读取题库", 0.78f, true)
             val remote = openRemoteBank(context, cache)
             try {
-                // 写入阶段(85% -> 99%)：事务内不响应取消
                 onProgress("正在写入本地题库 0%", 0.85f, false)
                 applyOfficialBank(remote) { done, total ->
                     val ratio = if (total > 0) done.toFloat() / total else 1f
@@ -895,13 +820,6 @@ class ReviewRepository(
         }
     }
 
-    /**
-     * 把远端官方题库合并进本地库（单个事务）：
-     * - 科目按名称匹配，远端新科目会新建，远端已删除的科目本地保留；
-     * - 官方题按 officialId 对齐：新增 / 覆盖题型·题干·答案·选项 / 删除远端已移除的官方题；
-     * - 备注(explanation)：本地已有内容时保留，本地为空才用远端内容；
-     * - 用户自建题(officialId 为空)完全不动；题目行 id 不变，因此掌握状态与复习进度保留。
-     */
     private suspend fun applyOfficialBank(
         remote: AppDatabase,
         onProgress: suspend (done: Int, total: Int) -> Unit
@@ -926,7 +844,6 @@ class ReviewRepository(
                 )[0]
             }
 
-            // 远端已删除的官方题：本地一并删除（级联清理选项/调度/日志/当天推送行）
             val remoteOfficialIds = remoteQuestions.map { it.question.id }.toSet()
             questionDao.getAllOfficial().forEach { local ->
                 val officialId = local.officialId
@@ -940,7 +857,7 @@ class ReviewRepository(
                 if (subjectId != null) {
                     val localId = questionDao.getByOfficialId(remoteDetail.question.id)?.id
                     if (localId == null) {
-                        // 新增官方题
+                        // 新增题
                         val now = System.currentTimeMillis()
                         val newId = questionDao.insertAll(
                             listOf(
@@ -970,7 +887,6 @@ class ReviewRepository(
                             )
                         )
                     } else {
-                        // 已有官方题：覆盖题型/题干/答案/选项；备注仅本地为空时更新
                         val localDetail = questionDao.getQuestionDetail(localId)
                         val localExplanation = localDetail?.question?.explanation.orEmpty()
                         questionDao.updateQuestionFields(
@@ -993,7 +909,6 @@ class ReviewRepository(
         }
     }
 
-    /** 用远端内容重建某题的选项与标签关联。 */
     private suspend fun replaceOptionsAndTags(localQuestionId: Long, remoteDetail: QuestionDetail) {
         questionOptionDao.deleteByQuestionId(localQuestionId)
         questionTagDao.deleteByQuestionId(localQuestionId)
@@ -1029,11 +944,6 @@ class ReviewRepository(
         }
     }
 
-    /**
-     * 把下载的官方库复制成普通 Room 库再打开。
-     * 已移除所有数据库迁移：因此要求远端题库文件必须是当前 schema 版本(v6)，
-     * 版本不符直接抛错（由调用方转成"更新失败"提示），绝不使用清库回退，避免误判为空库后清空本地官方题。
-     */
     private fun openRemoteBank(context: Context, downloaded: File): AppDatabase {
         val remoteVersion = readUserVersion(downloaded)
         if (remoteVersion != AppDatabase.SCHEMA_VERSION) {
@@ -1047,7 +957,6 @@ class ReviewRepository(
             .build()
     }
 
-    /** 读取 sqlite 文件的 user_version（不修改文件）。 */
     private fun readUserVersion(file: File): Int {
         android.database.sqlite.SQLiteDatabase.openDatabase(
             file.absolutePath,
@@ -1063,9 +972,6 @@ class ReviewRepository(
         return String(bytes, Charsets.UTF_8)
     }
 
-    /**
-     * 下载为字节数组。分块读取：每块回调已下载/总字节数，并检查协程取消，便于显示进度与随时终止。
-     */
     private suspend fun fetchBytes(
         url: String,
         onBytes: suspend (downloaded: Long, total: Long) -> Unit = { _, _ -> }

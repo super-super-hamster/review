@@ -35,9 +35,7 @@ data class ReviewUiState(
     val dailyRecords: List<DailyRecordEntity> = emptyList(),
     val remainingCount: Int = 0,
     val wrongCount: Int = 0,
-    /** 已掌握测试中答错、被自动置为未掌握的题目数 */
     val unmasteredCount: Int = 0,
-    /** 已掌握测试的题目总数（0 表示该科目没有已掌握题目） */
     val testTotal: Int = 0
 )
 
@@ -49,7 +47,6 @@ class ReviewViewModel(
     private val subjectId: Long = checkNotNull(savedStateHandle["subjectId"])
     private val mode: String = savedStateHandle.get<String>("mode") ?: "daily"
 
-    /** 是否为"已掌握题目测试"模式：不读写每日数据，答错仅置为未掌握。 */
     val isMasteredTest: Boolean = mode == "mastered_test"
 
     private val repository = ReviewRepository(AppDatabase.getInstance(application))
@@ -60,12 +57,6 @@ class ReviewViewModel(
     private val _masteredTestProgress = MutableStateFlow(0f)
     private var masteredTestTotal = 0
     private var masteredTestAnswered = 0
-
-    /**
-     * 顶栏环形进度：
-     * - 每日模式：与首页进度条同口径（已完成 / min(dailyLimit, 未掌握题数)）；
-     * - 测试模式：本次测试进度（已答题数 / 已掌握题总数）。
-     */
     val todayProgress: StateFlow<Float> = if (isMasteredTest) {
         _masteredTestProgress.asStateFlow()
     } else {
@@ -99,10 +90,8 @@ class ReviewViewModel(
 
     private val completedInSession = mutableSetOf<Long>()
 
-    /** 今日答错过的题：需要连续答对 REQUIRED_CORRECT_STREAK 次才算完成。仅会话内有效。 */
     private val wrongQuestions = mutableSetOf<Long>()
 
-    /** 错题当前的连续答对次数；答错即清零。仅会话内有效。 */
     private val correctStreak = mutableMapOf<Long, Int>()
 
     private data class WrongReviewItem(
@@ -112,8 +101,6 @@ class ReviewViewModel(
 
     companion object {
         private const val WRONG_REVIEW_GAP = 3
-
-        /** 错题需要连续答对的次数。 */
         private const val REQUIRED_CORRECT_STREAK = 3
     }
 
@@ -175,10 +162,6 @@ class ReviewViewModel(
         val questionId = current.question.id
         val streak = correctStreak[questionId] ?: 0
 
-        // 需要重问的情况：
-        // - 答错（错题重新排队）；
-        // - 错题答对但连续答对次数还没达标。
-        // 测试模式答错不回队重答（仅置为未掌握）。
         val needsRepeat = !isMasteredTest && !state.mastered &&
             (!correct || (questionId in wrongQuestions && streak < REQUIRED_CORRECT_STREAK))
         if (needsRepeat) {
@@ -295,19 +278,13 @@ class ReviewViewModel(
         }
     }
 
-
-    /**
-     * 完成当天学习后「再来一组」：补一组当天还没刷过的题并回到答题状态。
-     */
     fun startAnotherGroup() {
-        // 立即隐藏按钮，避免加载期间被重复点击
         _uiState.update { it.copy(canAnotherGroup = false) }
         viewModelScope.launch {
             val pushed = repository.startAnotherGroup(subjectId)
             if (pushed > 0) {
                 loadQueue()
             } else {
-                // 没有可推的新候选，维持完成态并刷新按钮显隐
                 refreshCanAnotherGroup()
             }
         }
@@ -347,7 +324,6 @@ class ReviewViewModel(
                 return@launch
             }
 
-            // 每天第一次进入时生成当天题目池；已有推送行则沿用（含错题待重答状态）
             repository.prepareTodayPool(subjectId)
             val statuses = repository.getSubjectDailyQuestions(subjectId)
 
@@ -355,7 +331,6 @@ class ReviewViewModel(
             val allQuestions = repository.getQuestionDetailsByIds(statuses.map { it.questionId })
             val questionsById = allQuestions.associateBy { it.question.id }
 
-            // 保持插入顺序（到期题在前、新题在后）
             normalQueue.addAll(
                 pending
                     .filter { !it.wrongPending }
@@ -390,7 +365,6 @@ class ReviewViewModel(
         }
     }
 
-    /** 已掌握题目测试：取全部已掌握题目并随机打乱，不涉及任何每日数据。 */
     private fun loadMasteredTestQueue() {
         viewModelScope.launch {
             normalQueue.clear()
@@ -430,11 +404,6 @@ class ReviewViewModel(
         }
     }
 
-    /**
-     * 递减错题间隔；到期(remainingGap <= 0)的错题插到 normalQueue 的"第 3 位"(下标 2)，
-     * 即答错后中间隔 5 道题再次出现；剩余不足 3 道时自然落到末尾。
-     * 多道同时到期时按答错先后依次排开。
-     */
     private fun advanceWrongQueue() {
         val ready = mutableListOf<QuestionDetail>()
         val iterator = wrongQueue.iterator()
@@ -460,7 +429,6 @@ class ReviewViewModel(
 
         if (isMasteredTest) {
             viewModelScope.launch {
-                // 不写日志/不更新调度/不计入每日统计；答错仅置为未掌握
                 if (!isCorrect) {
                     repository.toggleMastered(question.question.id, false)
                 }
@@ -485,7 +453,6 @@ class ReviewViewModel(
         val questionId = question.question.id
         val wasWrongBefore = questionId in wrongQuestions
 
-        // 错题规则：连续答对 3 次才算完成；中途答错清零重来
         val newStreak = if (isCorrect) (correctStreak[questionId] ?: 0) + 1 else 0
         if (isCorrect) {
             if (wasWrongBefore) correctStreak[questionId] = newStreak
@@ -495,8 +462,6 @@ class ReviewViewModel(
         }
         val completed = isCorrect && (!wasWrongBefore || newStreak >= REQUIRED_CORRECT_STREAK)
 
-        // 错题「3 连对」补答：前两次答对不写调度、不写日志（刚看过答案，不能代表真实复习）；
-        // 第 3 次达标时按 GOOD 结算一次（忽略耗时）。答错仍照常按 AGAIN 记录。
         val isStreakRetryWithoutSettlement =
             wasWrongBefore && isCorrect && newStreak < REQUIRED_CORRECT_STREAK
         val ignoreResponseTime = wasWrongBefore
@@ -519,7 +484,6 @@ class ReviewViewModel(
                 } else if (!isCorrect) {
                     repository.markDailyQuestionWrong(subjectId, questionId)
                 }
-                // 错题答对但未达标：保持 pending（wrongPending 维持此前状态），稍后重新提问
             }
             _uiState.update {
                 it.copy(

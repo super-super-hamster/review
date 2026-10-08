@@ -12,7 +12,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
-/** 编辑已有题目时的初始数据。 */
 data class QuestionEditorSeed(
     val id: Long,
     val content: String,
@@ -33,13 +32,11 @@ class AddQuestionViewModel(
 
     private val questionId: Long = savedStateHandle.get<Long>("questionId") ?: 0L
 
-    /** 是否为编辑模式。 */
     val isEdit: Boolean = questionId > 0L
 
     private val repository = ReviewRepository(AppDatabase.getInstance(application))
 
     private val _seed = MutableStateFlow<QuestionEditorSeed?>(null)
-    /** 编辑模式的初始数据；新增模式保持为 null。加载完成后填充。 */
     val seed: StateFlow<QuestionEditorSeed?> = _seed.asStateFlow()
 
     private val _loading = MutableStateFlow(isEdit)
@@ -66,10 +63,6 @@ class AddQuestionViewModel(
         }
     }
 
-    /**
-     * 保存：编辑模式走 updateQuestion（题型/选项数量不变），新增模式走 addQuestion。
-     * @param onDone 传回 true 表示保存成功
-     */
     fun saveQuestion(
         content: String,
         answer: String,
